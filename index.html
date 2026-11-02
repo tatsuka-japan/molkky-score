@@ -51,7 +51,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.1</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.4</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -158,11 +158,14 @@ td.l,th.l{text-align:left}
 </div>
 <div id="final"></div>
 <div id="board"></div>
-<div class="card" id="match-order-card" style="display:none; background:#faf8f5; border:1px dashed #ccc; padding:8px; margin-bottom:10px; border-radius:8px;">
-<b>📝 次の試合のチーム内オーダー調整</b>
-<p class="pl">次の試合を開始する前に、各チームの投げる順番を変更できます。</p>
+<div class="card" id="match-order-card" style="background:#faf8f5; border:1px dashed #ccc; padding:8px; margin-bottom:10px; border-radius:8px;">
+<div style="display:flex; justify-content:space-between; align-items:center;">
+<b>📝 チーム内オーダー（投げる順番）調整</b>
+<button type="button" class="sub" id="toggle-order-edit-btn" style="font-size:12px; padding:4px 8px;">折りたたむ</button>
+</div>
+<p class="pl" id="order-edit-desc">試合開始前または次の試合へ進む前に、各チームの投げる順番を変更できます。</p>
 <div id="next-order-container"></div>
-<p style="margin-top:8px;"><button class="sub" id="save-order" style="font-size:14px; padding:6px 12px;">順番を確定して次の試合へ進む</button></p>
+<p style="margin-top:8px;" id="order-save-area"><button class="sub" id="save-order" style="font-size:14px; padding:6px 12px; background:#2a9d3a;">現在の試合の順番を反映・保存する</button></p>
 </div>
 <div id="pad-area">
 <div class="card">
@@ -317,7 +320,7 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const uniq=a=>[...new Set(a)];
 let room=null,data=null,unsub=null,cur=-1,view="new",prevLen=-1,sig="",firstSnap=true;
-let isOrderingNextMatch = false;
+let isOrderCollapsed = true; // デフォルトで折りたたむ（隠す）状態にする
 let defaultHomeMembers = ["加藤", "木下", "佐藤", "千田", "成澤", "林", "広田", "前澤"];
 
 function renderHomeMembers() {
@@ -430,7 +433,6 @@ function updateTeamCheckboxes(){
   }
   $("team-containers").innerHTML = html;
   
-  // 匿名対戦チーム追加の説明文のチーム名を動的に更新
   const lastTeamName = teamNamesDefault[count - 1] || `チーム${count}`;
   const descElem = $("opponent-desc");
   if(descElem) {
@@ -459,11 +461,10 @@ $("teamcount").onchange = () => {
 $("add-opponent-btn").onclick = () => {
   if(!data) return;
   const count = parseInt($("teamcount").value) || 2;
-  const targetTeamIndex = count - 1; // 一番最後のチームに対戦相手を追加
+  const targetTeamIndex = count - 1;
   const size = parseInt($("opponent-size").value) || 2;
   if(!teamAssignments[count]) teamAssignments[count] = {};
   
-  // 既存の最後のチームの自動追加メンバーを一度クリア
   Object.keys(teamAssignments[count]).forEach(n => {
     if(teamAssignments[count][n] === targetTeamIndex && n.includes("チームの")) {
       delete teamAssignments[count][n];
@@ -541,9 +542,17 @@ window.sortSolo = (btn, direction) => {
 };
 
 function renderNextOrderForm(set) {
-  const lastMatchSides = set.matches[set.matches.length-1].customSides || set.sides;
+  const lastMatchIndex = set.matches.length - 1;
+  const lastMatchSides = set.matches[lastMatchIndex].customSides || set.sides;
   const isTeam = (set.type === "team");
   if(!isTeam) return;
+  
+  const S = summarize(set);
+  const descText = S.curDone 
+    ? "次の試合（またはこのセット）へ進む前に、各チームの投げる順番を変更できます。" 
+    : "現在の試合途中でも、各チームのメンバーの投げる順番を自由に変更できます。";
+  $("order-edit-desc").textContent = descText;
+  
   let html = lastMatchSides.map((s, idx) => {
     return `<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px; background:#fff;" class="next-team-card" data-side-index="${idx}">
       <b>${esc(s.name)}</b>
@@ -559,7 +568,16 @@ function renderNextOrderForm(set) {
       }).join("") + `</div></div>`;
   }).join("");
   $("next-order-container").innerHTML = html;
+  $("next-order-container").style.display = isOrderCollapsed ? "none" : "block";
+  $("order-save-area").style.display = isOrderCollapsed ? "none" : "block";
+  $("toggle-order-edit-btn").textContent = isOrderCollapsed ? "展開する" : "折りたたむ";
 }
+
+$("toggle-order-edit-btn").onclick = () => {
+  isOrderCollapsed = !isOrderCollapsed;
+  const set = data.sets[cur];
+  if(set) renderNextOrderForm(set);
+};
 
 function getTeamSides(){
   const container = $("team-containers");
@@ -621,7 +639,7 @@ function enter(code){
     const d=s.exists()?s.data():null;
     if(!d||!Array.isArray(d.sets)){alert("部屋が見つかりません");$("leave").onclick();return;}
     if(firstSnap){firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";}
-    else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderingNextMatch=false;}
+    else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderCollapsed=true;}
     if(cur>=d.sets.length)cur=d.sets.length-1;
     if(cur<0&&view==="set")view="new";
     prevLen=d.sets.length;data=d;render();
@@ -682,14 +700,14 @@ $("mkset").onclick=()=>{
   const games=Math.max(1,Math.min(99,parseInt($("ngames").value)||1));
   const missRule=$("nmissrule").value;
   const overRule=$("noverrule").value;
-  isOrderingNextMatch = false;
+  isOrderCollapsed = true;
   createSet({type,sides,mode:$("nmode").value,games,missRule,overRule,firstRule:$("nfirst").value});
 };
 
 $("copyset").onclick=()=>{
   const l=data.sets[data.sets.length-1];
   if(!l){alert("コピーできる前のセットがありません");return;}
-  isOrderingNextMatch = false;
+  isOrderCollapsed = true;
   createSet({type:l.type,sides:l.sides,mode:l.mode,games:l.games,missRule:l.missRule||"out",overRule:l.overRule||"25",firstRule:l.firstRule});
 };
 
@@ -731,11 +749,12 @@ $("undo").onclick=()=>{
 
 $("next").onclick=()=>{
   const set=data.sets[cur];
-  if(set.type === "team" && !isOrderingNextMatch) {
-    isOrderingNextMatch = true;
-    render();
+  const S = summarize(set);
+  if(set.type === "team" && !S.curDone) {
+    alert("この試合がまだ終了していません。");
     return;
   }
+  isOrderCollapsed = true; // 次の試合へ進むときにも閉じる
   proceedToNextMatch(null);
 };
 
@@ -749,12 +768,22 @@ $("save-order").onclick = () => {
     const newPlayers = [...memberItems].map(item => item.dataset.member);
     newCustomSides.push({name: origSide.name, players: newPlayers});
   });
-  proceedToNextMatch(newCustomSides);
+  
+  const mi = set.matches.length - 1;
+  mutate(d => {
+    const s = findSet(d, set.id);
+    if(s && s.matches[mi]) {
+      s.matches[mi].customSides = newCustomSides;
+    }
+  });
+  
+  // 保存後に自動で折りたたむ（隠す）状態にする
+  isOrderCollapsed = true;
+  render();
 };
 
 async function proceedToNextMatch(customSides) {
   const set=data.sets[cur],sid=set.id,mi=set.matches.length;
-  isOrderingNextMatch = false;
   stopTimer();
   timerSeconds = 0;
   updateTimerDisplay();
@@ -788,7 +817,7 @@ $("copystats").onclick=async()=>{
 document.getElementById("tabs").onclick=e=>{
   const v=e.target.dataset.v;if(!v)return;
   stopTimer();
-  if(v==="new"||v==="stats"){view=v; isOrderingNextMatch=false;}else{view="set";cur=+v; isOrderingNextMatch=false;}
+  if(v==="new"||v==="stats"){view=v;}else{view="set";cur=+v; isOrderCollapsed=true;}
   render();
 };
 
@@ -885,14 +914,11 @@ function renderSet(set){
     return `<div class="card ${cls}"><div><b class="${teamOutCls}">${esc(s.name)}${missInfo}</b><div class="pl">${pl}</div>${teamHistoryStr}</div> <div class="score">${stSide.score}<small>${S.wins[i]}勝｜合計${S.total[i]}点</small></div></div>`;
   }).join("");
 
-  if(isOrderingNextMatch && S.curDone && !S.over) {
-    stopTimer();
+  if (isTeam && !S.over) {
     $("match-order-card").style.display = "block";
-    $("pad-area").style.display = "none";
     renderNextOrderForm(set);
   } else {
     $("match-order-card").style.display = "none";
-    $("pad-area").style.display = "block";
   }
 
   const myTurn = isMyTurn();
