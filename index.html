@@ -50,7 +50,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.10 修正版</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.18 修正版</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -130,7 +130,7 @@ td.l,th.l{text-align:left}
 <label>トーナメントの対戦ルール <select id="ntournament-mode">
 <option value="game1">① 1本勝負（1ゲーム先取で勝ち抜け）</option>
 <option value="game2_wins">② 2本先取（最大3ゲーム、2勝で勝ち抜け）</option>
-<option value="match2_total">③ 2試合の合計得点（同点なら第3ゲーム）</option>
+<option value="match_total">③ 設定した試合数の合計得点（同点なら延長ゲーム）</option>
 </select></label>
 </div>
 <label>0点3回連続のルール <select id="nmissrule">
@@ -312,8 +312,9 @@ $("add-home-member").onclick = () => {
 };
 
 function syncTournamentModeFromGeneralSettings() {
-  if($("ntype").value === "tournament" && $("nmode").value === "total" && parseInt($("ngames").value, 10) === 2) {
-    $("ntournament-mode").value = "match2_total";
+  if(["tournament", "league"].includes($("ntype").value) && $("nmode").value === "total") {
+    const games = Math.max(1, parseInt($("ngames").value, 10) || 1);
+    $("ntournament-mode").value = games > 1 ? "match_total" : "game1";
   }
 }
 
@@ -331,38 +332,38 @@ function getGameThrows(match, gameIndex) {
   return Array.isArray(match[key]) ? match[key] : [];
 }
 
-function getMatchWinner(m, missRule, overRule) {
+function getMatchWinner(m, missRule, overRule, isTeam=false) {
   const customSides = m.customSides || m.sides;
   const mode = m.tournamentMode || "game1";
-  const g1 = getGameThrows(m, 0);
-  const g2 = getGameThrows(m, 1);
-  const g3 = getGameThrows(m, 2);
+  const g1 = getGameThrows(m, 0), g2 = getGameThrows(m, 1), g3 = getGameThrows(m, 2);
 
-  if (mode === "match2_total") {
-    const r1 = replay(customSides, g1, m.start, false, missRule, overRule);
-    const r2 = replay(customSides, g2, m.start, false, missRule, overRule);
-    if (r1.winner === null || r2.winner === null) return null;
-    const scores = r1.st.map((st, i) => st.score + r2.st[i].score);
-    const maxScore = Math.max(...scores);
-    const winners = scores.map((score, i) => score === maxScore ? i : -1).filter(i => i >= 0);
-    if (winners.length === 1) return winners[0];
-    const tieBreak = replay(customSides, g3, m.start, false, missRule, overRule);
+  if (mode === "match_total" || mode === "match2_total") {
+    const gamesToPlay = mode === "match2_total" ? 2 : Math.max(2, parseInt(m.gamesToPlay, 10) || 2);
+    const totals = customSides.map(() => 0);
+    for(let gameIndex = 0; gameIndex < gamesToPlay; gameIndex++) {
+      const game = getGameThrows(m, gameIndex);
+      const result = replay(customSides, game, m.start, isTeam, missRule, overRule);
+      if(result.winner === null) return null;
+      result.st.forEach((side, i) => totals[i] += side.score);
+    }
+    const maxScore = Math.max(...totals);
+    const winners = totals.map((score, i) => score === maxScore ? i : -1).filter(i => i >= 0);
+    if(winners.length === 1) return winners[0];
+    const tieBreak = replay(customSides, getGameThrows(m, gamesToPlay), m.start, isTeam, missRule, overRule);
     return tieBreak.winner;
   } else if (mode === "game2_wins") {
     const wins = customSides.map(() => 0);
     [g1, g2, g3].forEach(game => {
-      const result = replay(customSides, game, m.start, false, missRule, overRule);
-      if (result.winner !== null) wins[result.winner]++;
+      const result = replay(customSides, game, m.start, isTeam, missRule, overRule);
+      if(result.winner !== null) wins[result.winner]++;
     });
     const maxWins = Math.max(...wins);
-    if (maxWins >= 2) {
-      return wins.indexOf(maxWins);
-    }
+    if(maxWins >= 2) return wins.indexOf(maxWins);
     return null;
   } else {
-    if (g1.length > 0) {
-      const r = replay(customSides, g1, m.start, false, missRule, overRule);
-      return r.winner;
+    if(g1.length > 0) {
+      const result = replay(customSides, g1, m.start, isTeam, missRule, overRule);
+      return result.winner;
     }
     return null;
   }
@@ -371,7 +372,7 @@ function getMatchWinner(m, missRule, overRule) {
 function getMatchScoreHTML(match, set) {
   const sides = match.customSides || match.sides;
   const parts = [];
-  for(let gameIndex = 0; gameIndex < 3; gameIndex++) {
+  for(let gameIndex = 0; gameIndex < Math.max(3, (parseInt(match.gamesToPlay, 10) || 1) + 1); gameIndex++) {
     const throws = getGameThrows(match, gameIndex);
     if(throws.length === 0) continue;
     const result = replay(sides, throws, match.start, set.type === "team", set.missRule, set.overRule);
@@ -403,19 +404,54 @@ function isMyTurn(){
 const teamNamesDefault = ["赤チーム", "白チーム", "青チーム", "黄チーム", "緑チーム", "紫チーム", "橙チーム", "桃チーム"];
 let teamAssignments = {};
 
+function scoreSideKey(side, type) {
+  return type === "team" ? `team:${side.name}` : `player:${side.players[0] || side.name}`;
+}
+
+function getSetTotalScores(set) {
+  const totals = new Map(set.sides.map(side => [scoreSideKey(side, set.type), 0]));
+  set.matches.filter(match => !match.totalTiebreak).forEach(match => {
+    const sides = match.customSides || match.sides;
+    const gameCount = Math.max(3, (parseInt(match.gamesToPlay, 10) || 1) + 1);
+    for(let gameIndex = 0; gameIndex < gameCount; gameIndex++) {
+      const throws = getGameThrows(match, gameIndex);
+      if(throws.length === 0) continue;
+      const result = replay(sides, throws, match.start, set.type === "team", set.missRule, set.overRule);
+      result.st.forEach((sideResult, i) => {
+        const key = scoreSideKey(sides[i], set.type);
+        totals.set(key, (totals.get(key) || 0) + sideResult.score);
+      });
+    }
+  });
+  return totals;
+}
+
 function summarize(set){
   const {matches,type,missRule,overRule}=set;
-  let over = false;
-  if(type==="tournament"){
-    const allCompleted = matches.length > 0 && matches.every(m => getMatchWinner(m, missRule, overRule) !== null);
-    if (allCompleted) over = true;
-  } else {
-    const allDone = matches.length > 0 && matches.every(m => getMatchWinner(m, missRule, overRule) !== null);
-    if (allDone && matches.length >= (set.games || 1)) {
-      over = true;
+  if(type === "team" || type === "solo") {
+    if(set.mode === "total") {
+      const regularMatches = matches.filter(match => !match.totalTiebreak);
+      const regularDone = regularMatches.length > 0 && regularMatches.every(match => getMatchWinner(match, missRule, overRule, type === "team") !== null);
+      if(!regularDone) return {over:false, winnerNames:[]};
+      const totals = getSetTotalScores(set);
+      const maxScore = Math.max(...totals.values());
+      const leaders = set.sides.filter(side => totals.get(scoreSideKey(side, type)) === maxScore);
+      if(leaders.length === 1) return {over:true, winnerNames:[leaders[0].name]};
+      const tieBreak = matches.find(match => match.totalTiebreak);
+      if(tieBreak) {
+        const winner = getMatchWinner(tieBreak, missRule, overRule, type === "team");
+        if(winner !== null) {
+          const sides = tieBreak.customSides || tieBreak.sides;
+          return {over:true, winnerNames:[sides[winner].name]};
+        }
+      }
+      return {over:false, winnerNames:[]};
     }
+    const allDone = matches.length > 0 && matches.every(match => getMatchWinner(match, missRule, overRule, type === "team") !== null);
+    return {over:allDone && matches.length >= (set.games || 1), winnerNames:[]};
   }
-  return {over};
+  const allCompleted = matches.length > 0 && matches.every(match => getMatchWinner(match, missRule, overRule) !== null);
+  return {over:allCompleted, winnerNames:[]};
 }
 
 function tally(room){
@@ -425,7 +461,7 @@ function tally(room){
   (room.sets||[]).forEach(set=>{
     set.matches.forEach((m)=>{
       const matchSides = m.customSides || m.sides;
-      const gamesList = [getGameThrows(m, 0), getGameThrows(m, 1), getGameThrows(m, 2)];
+      const gamesList = Array.from({length: Math.max(3, (parseInt(m.gamesToPlay, 10) || 1) + 1)}, (_, i) => getGameThrows(m, i));
       gamesList.forEach(gt => {
         if(gt.length === 0) return;
         const r = replay(matchSides, gt, m.start, set.type==="team", set.missRule, set.overRule);
@@ -803,8 +839,8 @@ async function createSet(set){
       const shuffled = shuffleArray(set.sides);
       const n = shuffled.length;
       let tournamentMode = $("ntournament-mode").value;
-      if(set.mode === "total" && set.games === 2) {
-        tournamentMode = "match2_total";
+      if(set.mode === "total") {
+        tournamentMode = set.games > 1 ? "match_total" : "game1";
         $("ntournament-mode").value = tournamentMode;
       }
       
@@ -859,6 +895,9 @@ async function createSet(set){
           }
         }
       }
+      if(tournamentMode === "match_total") {
+        matches.forEach(match => { match.gamesToPlay = Math.max(2, parseInt(set.games, 10) || 2); });
+      }
     } else if(set.type === "league"){
       const pairs = [];
       for(let i=0; i<set.sides.length; i++){
@@ -867,16 +906,21 @@ async function createSet(set){
         }
       }
       const shuffledPairs = shuffleArray(pairs);
-      matches = shuffledPairs.map(p => ({
-        sides: [p[0], p[1]],
-        start: 0,
-        throws: [],
-        game1: [],
-        game2: [],
-        game3: [],
-        currentGameIndex: 0,
-        tournamentMode: "game1"
-      }));
+      const leagueMode = set.mode === "total" && set.games > 1 ? "match_total" : "game1";
+      matches = shuffledPairs.map(p => {
+        const match = {
+          sides: [p[0], p[1]],
+          start: 0,
+          throws: [],
+          game1: [],
+          game2: [],
+          game3: [],
+          currentGameIndex: 0,
+          tournamentMode: leagueMode
+        };
+        if(leagueMode === "match_total") match.gamesToPlay = Math.max(2, parseInt(set.games, 10) || 2);
+        return match;
+      });
     } else {
       const n = set.sides.length;
       const firstGameRule = $("nfirstgame") ? $("nfirstgame").value : "order";
@@ -978,12 +1022,10 @@ async function add(pts){
     const s=findSet(d,sid);
     if(!s||!s.matches[activeIdx])return false;
     const match = s.matches[activeIdx];
-    if(!Array.isArray(match.game1)) match.game1 = [];
-    if(!Array.isArray(match.game2)) match.game2 = [];
-    if(!Array.isArray(match.game3)) match.game3 = [];
-    const gameThrows = getGameThrows(match, gIdx);
-    gameThrows.push(pts);
-    match.throws = gameThrows;
+    const gameKey = `game${gIdx + 1}`;
+    if(!Array.isArray(match[gameKey])) match[gameKey] = [];
+    match[gameKey].push(pts);
+    match.throws = match[gameKey];
   });
 }
 
@@ -1089,22 +1131,29 @@ async function proceedToNextStep(customSides) {
     const mode = match.tournamentMode || "game1";
     const gIdx = match.currentGameIndex || 0;
     const g1 = getGameThrows(match, 0), g2 = getGameThrows(match, 1), g3 = getGameThrows(match, 2);
-    if(!Array.isArray(match.game3)) match.game3 = [];
-    
-    if (mode === "match2_total" && gIdx === 0) {
-      match.currentGameIndex = 1;
-      match.game2 = [];
-      match.throws = match.game2;
-      return;
-    } else if (mode === "match2_total" && gIdx === 1) {
-      const r1 = replay(match.customSides || match.sides, g1, match.start, false, s.missRule, s.overRule);
-      const r2 = replay(match.customSides || match.sides, g2, match.start, false, s.missRule, s.overRule);
-      const scores = r1.st.map((side, i) => side.score + r2.st[i].score);
-      if(Math.max(...scores) === Math.min(...scores)) {
-        match.currentGameIndex = 2;
-        match.game3 = [];
-        match.throws = match.game3;
+    if (mode === "match_total" || mode === "match2_total") {
+      const gamesToPlay = mode === "match2_total" ? 2 : Math.max(2, parseInt(match.gamesToPlay, 10) || 2);
+      if(gIdx < gamesToPlay - 1) {
+        match.currentGameIndex = gIdx + 1;
+        const nextGameKey = `game${match.currentGameIndex + 1}`;
+        if(!Array.isArray(match[nextGameKey])) match[nextGameKey] = [];
+        match.throws = match[nextGameKey];
         return;
+      }
+      if(gIdx === gamesToPlay - 1) {
+        const sides = match.customSides || match.sides;
+        const totals = sides.map(() => 0);
+        for(let gameIndex = 0; gameIndex < gamesToPlay; gameIndex++) {
+          const gameResult = replay(sides, getGameThrows(match, gameIndex), match.start, false, s.missRule, s.overRule);
+          gameResult.st.forEach((side, i) => totals[i] += side.score);
+        }
+        if(Math.max(...totals) === Math.min(...totals)) {
+          match.currentGameIndex = gamesToPlay;
+          const tieBreakKey = `game${gamesToPlay + 1}`;
+          match[tieBreakKey] = [];
+          match.throws = match[tieBreakKey];
+          return;
+        }
       }
     } else if (mode === "game2_wins") {
       const wins = (match.customSides || match.sides).map(() => 0);
@@ -1314,9 +1363,27 @@ async function proceedToNextStep(customSides) {
       }
     }
     
+    if((s.type === "team" || s.type === "solo") && s.mode === "total") {
+      const regularMatches = s.matches.filter(item => !item.totalTiebreak);
+      const tieBreakExists = s.matches.some(item => item.totalTiebreak);
+      const regularDone = regularMatches.length > 0 && regularMatches.every(item => getMatchWinner(item, s.missRule, s.overRule, s.type === "team") !== null);
+      if(!tieBreakExists && regularDone && s.activeMatchIndex === regularMatches.length - 1) {
+        const totals = getSetTotalScores(s);
+        const maxScore = Math.max(...totals.values());
+        const tiedSides = s.sides.filter(side => totals.get(scoreSideKey(side, s.type)) === maxScore);
+        if(tiedSides.length > 1) {
+          const tieBreak = {sides:tiedSides, start:0, throws:[], game1:[], game2:[], game3:[], currentGameIndex:0, tournamentMode:"game1", totalTiebreak:true};
+          s.matches.push(tieBreak);
+          s.activeMatchIndex++;
+          return;
+        }
+      }
+    }
+
     if(s.activeMatchIndex + 1 < s.matches.length) {
       s.activeMatchIndex++;
       const nextM = s.matches[s.activeMatchIndex];
+      // 次の試合は新しいゲーム記録から開始し、今回の得点を0に戻す
       nextM.game1 = [];
       nextM.game2 = [];
       nextM.game3 = [];
@@ -1441,7 +1508,7 @@ function renderSet(set){
   const currentMatchRes = replay(customSides, throwsList, m.start, set.type==="team", set.missRule, set.overRule);
   const curDone = currentMatchRes.winner !== null;
   
-  const matchWinnerIdx = getMatchWinner(m, set.missRule, set.overRule);
+  const matchWinnerIdx = getMatchWinner(m, set.missRule, set.overRule, set.type === "team");
   const matchOver = matchWinnerIdx !== null;
 
   const S = summarize(set);
@@ -1475,14 +1542,15 @@ function renderSet(set){
     else stageName = "【1回戦】";
   }
 
-  const modeLabel = m.tournamentMode === "match2_total" ? ` (2試合合計戦 ${gIdx < 2 ? `ゲーム${gIdx+1}/2` : "同点決着ゲーム"})` : m.tournamentMode === "game2_wins" ? ` (最大3ゲーム・2本先取)` : ` (1本勝負)`;
-  $("setinfo").textContent=set.type==="tournament" ? `トーナメント戦 ${stageName}${modeLabel}` : set.type==="league" ? `総当たりリーグ戦 【第${activeIdx+1}試合】` : `第${activeIdx+1}試合 / 全${set.matches.length}試合`;
-  $("final").innerHTML=S.over ? `<div class="banner">🏆 セットの全日程が終了しました！</div>`:"";
+  const totalGames = m.tournamentMode === "match2_total" ? 2 : (parseInt(m.gamesToPlay, 10) || 2);
+  const modeLabel = (m.tournamentMode === "match_total" || m.tournamentMode === "match2_total") ? ` (${totalGames}試合合計戦 ${gIdx < totalGames ? `ゲーム${gIdx+1}/${totalGames}` : "同点決着ゲーム"})` : m.tournamentMode === "game2_wins" ? ` (最大3ゲーム・2本先取)` : ` (1本勝負)`;
+  $("setinfo").textContent=set.type==="tournament" ? `トーナメント戦 ${stageName}${modeLabel}` : set.type==="league" ? `総当たりリーグ戦 【第${activeIdx+1}試合】${m.tournamentMode === "match_total" ? modeLabel : ""}` : `第${activeIdx+1}試合 / 全${set.matches.length}試合`;
+  $("final").innerHTML=S.over ? `<div class="banner">🏆 ${S.winnerNames && S.winnerNames.length ? `セット優勝：${S.winnerNames.map(name => esc(name)).join("・")}` : "セットの全日程が終了しました！"}</div>`:"";
   
   if(set.type === "tournament" || set.type === "league") {
     $("tournament-overview").classList.remove("hide");
     let treeHtml = `<ul>` + set.matches.map((mt, idx) => {
-      const mw = getMatchWinner(mt, set.missRule, set.overRule);
+      const mw = getMatchWinner(mt, set.missRule, set.overRule, set.type === "team");
       const isDone = mw !== null;
       const mSides = mt.customSides || mt.sides;
       const winnerName = isDone ? mSides[mw].name : "（前の試合の終了待ち）";
@@ -1524,14 +1592,14 @@ function renderSet(set){
     $("tournament-overview").classList.add("hide");
   }
 
-  const scoreKey = side => set.type === "team" ? `team:${side.name}` : `player:${side.players[0] || side.name}`;
+  const scoreKey = side => scoreSideKey(side, set.type);
   const previousScores = new Map(), totalScores = new Map();
   for(let matchIndex = 0; matchIndex <= activeIdx; matchIndex++) {
     const historyMatch = set.matches[matchIndex];
     if(!historyMatch) continue;
     const historySides = historyMatch.customSides || historyMatch.sides;
     const matchTotals = new Map();
-    const lastGame = matchIndex === activeIdx ? gIdx : 2;
+    const lastGame = matchIndex === activeIdx ? gIdx : Math.max(2, parseInt(historyMatch.gamesToPlay, 10) || 1);
     for(let gameIndex = 0; gameIndex <= lastGame; gameIndex++) {
       const gameThrows = getGameThrows(historyMatch, gameIndex);
       if(gameThrows.length === 0) continue;
@@ -1542,7 +1610,7 @@ function renderSet(set){
         totalScores.set(key, (totalScores.get(key) || 0) + sideResult.score);
       });
     }
-    if(matchIndex < activeIdx && getMatchWinner(historyMatch, set.missRule, set.overRule) !== null) {
+    if(matchIndex < activeIdx && getMatchWinner(historyMatch, set.missRule, set.overRule, set.type === "team") !== null) {
       matchTotals.forEach((score, key) => previousScores.set(key, score));
     }
   }
@@ -1556,9 +1624,15 @@ function renderSet(set){
       return `<span class="${set.type!=="team"&&q.out?"out":""}">${esc(p)}${historyStr}</span>`;
     }).join(" ");
     const key = scoreKey(s);
-    const previous = previousScores.has(key) ? `${previousScores.get(key)}点` : "-";
+    let previousScore = previousScores.has(key) ? previousScores.get(key) : null;
+    if(gIdx > 0) {
+      const priorGame = replay(customSides, getGameThrows(m, gIdx - 1), m.start, set.type === "team", set.missRule, set.overRule);
+      previousScore = priorGame.st[i].score;
+    }
+    const previous = previousScore === null ? "-" : `${previousScore}点`;
+    const previousLabel = gIdx > 0 ? "前のゲーム" : "前の試合";
     const total = totalScores.get(key) || 0;
-    return `<div class="card ${cls}"><div><b>${esc(s.name)}</b><div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>このゲーム</small><small>前の試合 ${previous}</small><small>合計 ${total}点</small></div></div>`;
+    return `<div class="card ${cls}"><div><b>${esc(s.name)}</b><div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>今回のゲーム</small><small>${previousLabel} ${previous}</small><small>合計 ${total}点</small></div></div>`;
   }).join("");
 
   // 個人戦・トーナメント・リーグでもオーダー/先攻後攻の並び替えパネルを表示する
@@ -1581,7 +1655,7 @@ function renderSet(set){
   let resultsHtml = "<table><tr><th>試合</th><th>先攻</th><th>対戦カード</th><th>対戦スコア</th><th>勝者</th></tr>";
   resultsHtml += set.matches.map((mt,mi)=>{
     const mSides = mt.customSides || mt.sides;
-    const mw = getMatchWinner(mt, set.missRule, set.overRule);
+    const mw = getMatchWinner(mt, set.missRule, set.overRule, set.type === "team");
     const winnerText = mw !== null ? esc(mSides[mw].name) : "進行中";
     const vsString = mSides.map(s => s.name).join(" vs ");
     const scoreText = getMatchScoreHTML(mt, set);
