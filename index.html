@@ -13,7 +13,8 @@ h1{font-size:20px;margin:4px 0}
 .side.win{outline:4px solid #2a9d3a;background:#e6f7e8}
 .score{font-size:40px;font-weight:bold;text-align:right}
 .score small{display:block;font-size:12px;font-weight:normal;color:#555}
-.pl{font-size:13px;color:#555}.out{text-decoration:line-through;color:#c33}
+.pl{font-size:13px;color:#555}
+.out{text-decoration:line-through;color:#c33}
 button{font-size:18px;padding:10px;border:0;border-radius:10px;background:#3b6ea8;color:#fff}
 button.sub{background:#888;font-size:15px}
 button.go{background:#2a9d3a;width:100%}
@@ -24,20 +25,34 @@ button.tab.on{background:#3b6ea8;color:#fff}
 textarea,input[type=text],input[type=number],select{font-size:16px;width:100%;box-sizing:border-box;padding:8px;margin:4px 0}
 label{display:block;margin-top:6px}
 .chk label{display:inline-block;margin:4px 10px 4px 0;font-size:16px}
-.hide{display:none}.big{font-size:22px;font-weight:bold}
+.hide{display:none}
+.big{font-size:22px;font-weight:bold}
 .banner{background:#2a9d3a;color:#fff;border-radius:12px;padding:14px;font-size:20px;font-weight:bold;text-align:center}
-table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:4px;text-align:center}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{border-bottom:1px solid #ddd;padding:4px;text-align:center}
 td.l,th.l{text-align:left}
+.throw-history{font-size:11px;color:#666;margin-top:2px;background:#f9f9f9;padding:2px 6px;border-radius:4px;display:inline-block}
+.match-timer-box{display:flex;align-items:center;gap:8px;background:#eef4fb;padding:4px 10px;border-radius:6px}
+.match-timer{font-size:16px;font-weight:bold;color:#3b6ea8}
+.disabled-member{color:#aaa;text-decoration:line-through;}
 </style>
 </head>
 <body>
 <h1>🎯 モルック スコア</h1>
+
 <div id="home">
   <div class="card">
     <b>今日の部屋を作る</b>
-    <p class="pl">今日の参加者を入力してください（改行かカンマ区切り）。</p>
-    <textarea id="players" rows="4">加藤,木下,佐藤,千田,成澤,林,広田,前澤</textarea>
-    <p><button id="create">部屋を作る</button></p>
+    <p class="pl">参加するメンバーにチェックを入れてください。新しいメンバーを追加することもできます。</p>
+    
+    <div id="home-players-container" style="margin:8px 0; display:flex; flex-wrap:wrap; gap:8px;"></div>
+    
+    <div style="display:flex; gap:6px; margin-top:8px;">
+      <input id="new-home-member" type="text" placeholder="新しいメンバーの名前" style="margin:0;">
+      <button type="button" class="sub" id="add-home-member" style="font-size:14px; padding:6px 12px;">追加</button>
+    </div>
+
+    <p style="margin-top:12px;"><button id="create">チェックしたメンバーで部屋を作る</button></p>
   </div>
   <div class="card">
     <b>部屋に参加する</b>
@@ -45,29 +60,48 @@ td.l,th.l{text-align:left}
     <p><button id="join">参加する</button></p>
   </div>
 </div>
+
 <div id="game" class="hide">
-  <div class="card"><span class="pl">部屋コード</span>
-    <span class="big" id="rc"></span>
-    <span class="pl">自分は</span>
-    <select id="me" style="width:auto"></select>
+  <div class="card">
+    <span class="pl">部屋コード</span> <span class="big" id="rc"></span>
+    <span class="pl">自分は</span> <select id="me" style="width:auto"></select>
     <label style="margin-top:6px;"><input type="checkbox" id="restrict-my-turn" checked> 🔒 自分のチーム（または自分）の番のときだけ入力する（※佐藤は特権で常にどこでも入力可能）</label>
-    <div><input id="addname" type="text" placeholder="参加者を追加" style="width:60%">
-    <button class="sub" id="addbtn">追加</button></div>
-    <button class="sub" id="leave" style="margin-top:6px">退出</button></div>
+    <div><input id="addname" type="text" placeholder="参加者を追加" style="width:60%"> <button class="sub" id="addbtn">追加</button></div>
+    <button class="sub" id="leave" style="margin-top:6px">退出</button>
+  </div>
+
   <div id="tabs"></div>
+
   <div id="v-new" class="hide">
     <div class="card">
       <b>新しいセットを作る</b>
-      <label>種類 <select id="ntype"><option value="team">団体戦（チーム対抗）</option><option value="solo">個人戦（1対1／参加者全員）</option></select></label>
+      <label>種類 <select id="ntype">
+        <option value="team">団体戦（チーム対抗）</option>
+        <option value="solo">個人戦（1対1／参加者全員）</option>
+      </select></label>
+
       <div id="n-team">
-        <label>チーム数 <input id="teamcount" type="number" min="2" max="6" value="2"></label>
-        <p class="pl">各チームのメンバーにチェックを入れ、「▲」「▼」で順番を調整してください。</p>
+        <input type="hidden" id="teamcount" value="2">
+        
+        <!-- 不明な対戦チーム追加用パネル -->
+        <div style="background:#faf8f5; border:1px dashed #ccc; padding:8px; border-radius:8px; margin:8px 0;">
+          <b>👥 名前不明の対戦相手（匿名チーム）を追加</b>
+          <p class="pl" style="margin:2px 0 6px 0;">対戦相手の人数を指定してボタンを押すと、相手チーム（白チーム）として「〇人目」を自動追加します。</p>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label style="margin:0; font-size:14px;">対戦相手の人数: <input id="opponent-size" type="number" min="1" max="10" value="2" style="width:70px; display:inline-block; margin:0; padding:4px;"></label>
+            <button type="button" class="sub" id="add-opponent-btn" style="font-size:13px; padding:6px 12px; background:#2a9d3a;">＋ 匿名対戦チームをセット</button>
+          </div>
+        </div>
+
+        <p class="pl">各チームのメンバーを確認・調整してください。（[UP][DOWN]で順番変更可）</p>
         <div id="team-containers"></div>
       </div>
+
       <div id="n-solo" class="hide">
-        <p class="pl">出場する人にチェックを入れ、「▲」「▼」で個人の投球順を並び替えてください。</p>
+        <p class="pl">出場する人にチェックを入れ、「[UP]」「[DOWN]」で個人の投球順を並び替えてください。</p>
         <div id="solo-containers"></div>
       </div>
+
       <label>セットの勝ち方 <select id="nmode">
         <option value="fixed">① 試合数を決める（勝利数が多いサイドの勝ち）</option>
         <option value="first">② 先取り（先に○勝したサイドの勝ち）</option>
@@ -76,6 +110,7 @@ td.l,th.l{text-align:left}
       <label><span id="nglabel">試合数</span><input id="ngames" type="number" min="1" max="99" value="3"></label>
       <label>第1試合の先攻（並び順） <select id="nfirstgame">
         <option value="order">登録・チェック順のまま</option>
+        <option value="custom">カスタム（自由に並び替え）</option>
         <option value="shuffle">ランダム（シャッフル）</option>
         <option value="reverse">逆順（後ろから）</option>
       </select></label>
@@ -84,21 +119,36 @@ td.l,th.l{text-align:left}
         <option value="loser">前の試合で点が低かったサイド</option>
         <option value="same">いつも同じサイド（先頭）</option>
       </select></label>
-      <p><button id="mkset">セットを作る</button>
-      <button class="sub" id="copyset">前のセットと同じ設定で作る</button></p>
+      <p><button id="mkset">セットを作る</button> <button class="sub" id="copyset">前のセットと同じ設定で作る</button></p>
     </div>
   </div>
+
   <div id="v-set" class="hide">
-    <div class="card"><b id="setname"></b>
-    <span class="pl" id="setinfo"></span></div>
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div><b id="setname"></b> <span class="pl" id="setinfo"></span></div>
+        <div class="match-timer-box">
+          <div id="match-timer-display" class="match-timer">⏱️ 00:00</div>
+          <button type="button" id="timer-start-btn" class="sub" style="font-size:13px; padding:4px 10px;">スタート</button>
+          <button type="button" id="timer-reset-btn" class="sub" style="font-size:13px; padding:4px 10px; background:#c33;">リセット</button>
+        </div>
+      </div>
+    </div>
     <div id="final"></div>
     <div id="board"></div>
-    <div class="card">
-      <div class="big" id="turn"></div>
-      <div class="grid" id="pad"></div>
-      <p><button class="go hide" id="next">次の試合へ</button></p>
-      <p><button class="sub" id="undo">1つ戻す</button>
-      <button class="sub" id="delset">このセットを削除</button></p>
+    <div class="card" id="match-order-card" style="display:none; background:#faf8f5; border:1px dashed #ccc; padding:8px; margin-bottom:10px; border-radius:8px;">
+      <b>📝 次の試合のチーム内オーダー調整</b>
+      <p class="pl">次の試合を開始する前に、各チームの投げる順番を変更できます。</p>
+      <div id="next-order-container"></div>
+      <p style="margin-top:8px;"><button class="sub" id="save-order" style="font-size:14px; padding:6px 12px;">順番を確定して次の試合へ進む</button></p>
+    </div>
+    <div id="pad-area">
+      <div class="card">
+        <div class="big" id="turn"></div>
+        <div class="grid" id="pad"></div>
+        <p><button class="go hide" id="next">次の試合へ進む</button></p>
+        <p><button class="sub" id="undo">1つ戻す</button> <button class="sub" id="delset">このセットを削除</button></p>
+      </div>
     </div>
     <div class="card" id="input-lock-msg" style="color:#c33;font-weight:bold;text-align:center;display:none;">
       🔒 現在はあなたのチーム（またはあなた）の番ではないため、スコア入力できません
@@ -106,81 +156,146 @@ td.l,th.l{text-align:left}
     <div class="card"><b>試合結果</b><div id="results"></div></div>
     <div class="card"><b>この試合の投球履歴</b><div id="log" class="pl"></div></div>
   </div>
+
   <div id="v-stats" class="hide">
     <div class="card"><b>今日の通算成績</b>
       <div id="stats"></div>
-      <p><button class="sub" id="copystats">表をコピー（Excelに貼り付け用）</button></p></div>
+      <p><button class="sub" id="copystats">表をコピー（Excelに貼り付け用）</button></p>
+    </div>
     <div class="card"><b>セット一覧</b><div id="setlist"></div></div>
   </div>
 </div>
+
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {getFirestore,doc,setDoc,onSnapshot,runTransaction} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
 const firebaseConfig={apiKey:"AIzaSyAautN2cGfEco5KvR0iPzgftSgpiqr3pUw", authDomain:"molkky-998f1.firebaseapp.com", projectId:"molkky-998f1", storageBucket:"molkky-998f1.firebasestorage.app", messagingSenderId:"815701794917", appId:"1:815701794917:web:8c4271e83d153f2bb1268c"};
 const db=getFirestore(initializeApp(firebaseConfig));
 
-function replay(sides,throws,start,isTeam){const n=sides.length;
-const st=sides.map(s=>({score:0, ptr:0, teamMiss:0, teamOut:false, players:s.players.map(()=>({miss:0,out:false,pts:0,n:0,zero:0}))}));
-const sideOut=i=>isTeam ? st[i].teamOut : st[i].players.every(p=>p.out);
-const pick=i=>{const s=st[i];let k=s.ptr;while(s.players[k].out)k=(k+1)%s.players.length;return k;};
-let turn=start||0,winner=null;
-for(const pts of throws){if(winner!==null)break;
-const s=st[turn],pi=pick(turn),p=s.players[pi];
-p.n++;p.pts+=pts;
-if(pts===0){p.zero++;
-if(isTeam){s.teamMiss++;if(s.teamMiss>=3){s.teamOut=true;s.score=0;}}
-else{p.miss++;if(p.miss>=3){p.out=true;if(sideOut(turn))s.score=0;}}
-}else{if(isTeam){s.teamMiss=0;}else{p.miss=0;}
-const t=s.score+pts;s.score=t>50?25:t;if(t===50)winner=turn;}
-s.ptr=(pi+1)%s.players.length;
-if(winner!==null)break;
-const alive=st.map((_,i)=>i).filter(i=>!sideOut(i));
-if(n>1&&alive.length===1){winner=alive[0];break;}
-for(let k=1;k<=n;k++){const j=(turn+k)%n;if(!sideOut(j)){turn=j;break;}}
+let matchTimerInterval = null;
+let timerSeconds = 0;
+let isTimerRunning = false;
+
+function replay(sides,throws,start,isTeam){
+  const n=sides.length;
+  const st=sides.map(s=>({
+    score:0, 
+    ptr:0, 
+    teamMiss:0, 
+    teamOut:false, 
+    throwsHistory: [],
+    players:s.players.map(()=>({miss:0,out:false,pts:0,n:0,zero:0, history:[]}))
+  }));
+
+  const sideOut=i=>isTeam ? st[i].teamOut : st[i].players.every(p=>p.out);
+  const pick=i=>{const s=st[i];let k=s.ptr;while(s.players[k].out)k=(k+1)%s.players.length;return k;};
+  let turn=start||0,winner=null;
+
+  for(const pts of throws){
+    if(winner!==null)break;
+    const s=st[turn],pi=pick(turn),p=s.players[pi];
+    p.n++;p.pts+=pts;
+    p.history.push(pts);
+    s.throwsHistory.push(pts);
+
+    if(pts===0){
+      p.zero++;
+      if(isTeam){s.teamMiss++;if(s.teamMiss>=3){s.teamOut=true;s.score=0;}}
+      else{p.miss++;if(p.miss>=3){p.out=true;if(sideOut(turn))s.score=0;}}
+    }else{
+      if(isTeam){s.teamMiss=0;}else{p.miss=0;}
+      const t=s.score+pts;s.score=t>50?25:t;if(t===50)winner=turn;
+    }
+    s.ptr=(pi+1)%s.players.length;
+    if(winner!==null)break;
+    const alive=st.map((_,i)=>i).filter(i=>!sideOut(i));
+    if(n>1&&alive.length===1){winner=alive[0];break;}
+    for(let k=1;k<=n;k++){const j=(turn+k)%n;if(!sideOut(j)){turn=j;break;}}
+  }
+  return {st,turn,winner,who:winner===null?pick(turn):null};
 }
-return {st,turn,winner,who:winner===null?pick(turn):null};
+
+function summarize(set){
+  const {sides,matches,mode,games,type}=set,n=sides.length;
+  const isTeam=(type==="team");
+  const res=matches.map(m=>replay(m.customSides || sides,m.throws,m.start,isTeam));
+  const wins=Array(n).fill(0),total=Array(n).fill(0);
+  let played=0;
+  res.forEach(r=>{r.st.forEach((s,i)=>total[i]+=s.score);if(r.winner!==null){wins[r.winner]++;played++;}});
+  const top=(arr,idx)=>{const m=Math.max(...idx.map(i=>arr[i]));return idx.filter(i=>arr[i]===m);};
+  const all=sides.map((_,i)=>i);
+  let over=false,winners=[],note="";
+  if(mode==="first"){if(Math.max(...wins)>=games){over=true;winners=top(wins,all);}}
+  else if(played>=games){
+    over=true;
+    if(mode==="total"){winners=top(total,all);}
+    else{winners=top(wins,all);if(winners.length>1){winners=top(total,winners);note="（勝利数が同じため合計得点で判定）";}}
+  }
+  const cur=res[res.length-1];
+  return {res,wins,total,played,over,winners,note,cur,curDone:cur.winner!==null};
 }
-function summarize(set){const {sides,matches,mode,games,type}=set,n=sides.length;
-const isTeam=(type==="team");
-const res=matches.map(m=>replay(sides,m.throws,m.start,isTeam));
-const wins=Array(n).fill(0),total=Array(n).fill(0);
-let played=0;
-res.forEach(r=>{r.st.forEach((s,i)=>total[i]+=s.score);if(r.winner!==null){wins[r.winner]++;played++;}});
-const top=(arr,idx)=>{const m=Math.max(...idx.map(i=>arr[i]));return idx.filter(i=>arr[i]===m);};
-const all=sides.map((_,i)=>i);
-let over=false,winners=[],note="";
-if(mode==="first"){if(Math.max(...wins)>=games){over=true;winners=top(wins,all);}}
-else if(played>=games){over=true;
-if(mode==="total"){winners=top(total,all);}
-else{winners=top(wins,all);if(winners.length>1){winners=top(total,winners);note="（勝利数が同じため合計得点で判定）";}}
+
+function nextStart(set){
+  const n=set.sides.length,k=set.matches.length;
+  const isTeam=(set.type==="team");
+  const activeSides = set.matches[k-1].customSides || set.sides;
+  if(set.firstRule==="rotate")return k%n;
+  if(set.firstRule==="loser"){
+    const r=replay(activeSides,set.matches[k-1].throws,set.matches[k-1].start,isTeam);
+    let lo=0;r.st.forEach((s,i)=>{if(s.score<r.st[lo].score)lo=i;});
+    return lo;
+  }
+  return 0;
 }
-const cur=res[res.length-1];
-return {res,wins,total,played,over,winners,note,cur,curDone:cur.winner!==null};
+
+function tally(room){
+  const T={};
+  const get=n=>T[n]||(T[n]={name:n,played:0,win:0,setWin:0,n:0,pts:0,zero:0});
+  (room.players||[]).forEach(get);
+  (room.sets||[]).forEach(set=>{
+    const S=summarize(set);
+    S.res.forEach((r,mi)=>{
+      const matchSides = set.matches[mi].customSides || set.sides;
+      r.st.forEach((sd,i)=>sd.players.forEach((p,j)=>{
+        const t=get(matchSides[i].players[j]);
+        t.n+=p.n;t.pts+=p.pts;t.zero+=p.zero;
+        if(r.winner!==null){t.played++;if(r.winner===i)t.win++;}
+      }));
+    });
+    if(S.over)S.winners.forEach(i=>set.sides[i].players.forEach(nm=>get(nm).setWin++));
+  });
+  return Object.values(T).sort((a,b)=> b.win-a.win || (b.played?b.win/b.played:0)-(a.played?b.win/b.played:0) || b.pts-a.pts);
 }
-function nextStart(set){const n=set.sides.length,k=set.matches.length;
-const isTeam=(set.type==="team");
-if(set.firstRule==="rotate")return k%n;
-if(set.firstRule==="loser"){const r=replay(set.sides,set.matches[k-1].throws,set.matches[k-1].start,isTeam);
-let lo=0;r.st.forEach((s,i)=>{if(s.score<r.st[lo].score)lo=i;});return lo;}
-return 0;
-}
-function tally(room){const T={};
-const get=n=>T[n]||(T[n]={name:n,played:0,win:0,setWin:0,n:0,pts:0,zero:0});
-(room.players||[]).forEach(get);
-(room.sets||[]).forEach(set=>{const S=summarize(set);
-S.res.forEach(r=>r.st.forEach((sd,i)=>sd.players.forEach((p,j)=>{
-const t=get(set.sides[i].players[j]);
-t.n+=p.n;t.pts+=p.pts;t.zero+=p.zero;
-if(r.winner!==null){t.played++;if(r.winner===i)t.win++;}
-})));
-if(S.over)S.winners.forEach(i=>set.sides[i].players.forEach(nm=>get(nm).setWin++));
-});
-return Object.values(T).sort((a,b)=> b.win-a.win || (b.played?b.win/b.played:0)-(a.played?a.win/a.played:0) || b.pts-a.pts);
-}
+
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const uniq=a=>[...new Set(a)];
 let room=null,data=null,unsub=null,cur=-1,view="new",prevLen=-1,sig="",firstSnap=true;
+let isOrderingNextMatch = false;
+
+let defaultHomeMembers = ["加藤", "木下", "佐藤", "千田", "成澤", "林", "広田", "前澤"];
+
+function renderHomeMembers() {
+  const container = $("home-players-container");
+  if(!container) return;
+  container.innerHTML = defaultHomeMembers.map(name => {
+    return `<label style="display:inline-flex; align-items:center; background:#eee; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:15px; margin:2px;">` +
+      `<input type="checkbox" class="home-member-chk" value="${esc(name)}" checked style="margin-right:6px; width:18px; height:18px;"> ${esc(name)}` +
+      `</label>`;
+  }).join("");
+}
+renderHomeMembers();
+
+$("add-home-member").onclick = () => {
+  const input = $("new-home-member");
+  const name = input.value.trim();
+  if(name && !defaultHomeMembers.includes(name)) {
+    defaultHomeMembers.push(name);
+    input.value = "";
+    renderHomeMembers();
+  }
+};
 
 function isMyTurn(){
   const me = localStorage.me || "";
@@ -191,41 +306,152 @@ function isMyTurn(){
   const set = data.sets[cur];
   const S = summarize(set);
   if(S.curDone || S.over) return true;
-  
   const currentSideIndex = S.cur.turn;
-  const currentSide = set.sides[currentSideIndex];
+  const activeSides = set.matches[set.matches.length-1].customSides || set.sides;
+  const currentSide = activeSides[currentSideIndex];
   return currentSide && currentSide.players.includes(me);
 }
 
-function splitNames(t){return uniq(t.split(/[\n,、，]/).map(s=>s.trim()).filter(Boolean));}
-const teamNamesDefault=["赤チーム", "白チーム", "青チーム", "黄チーム", "緑チーム", "紫チーム"];
+const teamNamesDefault=["赤チーム", "白チーム"];
+let teamAssignments = {};
 
-function updateTeamCheckboxes(){if(!data)return;
-const count=Math.max(2, Math.min(6, parseInt($("teamcount").value) || 2));
-const players=data.players;
-let html="";
-for(let i=0; i<count; i++){const teamName=teamNamesDefault[i] || `チーム${i+1}`;
-html+=`<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px;" class="team-card" data-index="${i}"> <b>${teamName}</b> ` +
-`<button type="button" class="sub" style="font-size:12px;padding:2px 6px;float:right;" onclick="window.sortTeam(${i}, 'up')">▲</button>` +
-`<button type="button" class="sub" style="font-size:12px;padding:2px 6px;float:right;margin-right:4px;" onclick="window.sortTeam(${i}, 'down')">▼</button>` +
-`<div class="chk team-chk-group" style="margin-top:6px;">` +
-players.map((n, idx)=>{const isChecked = (idx % count === i); return `<label><input type="checkbox" value="${esc(n)}" ${isChecked?"checked":""}> ${esc(n)}</label>`; }).join("") + `</div></div>`;
-}
-$("team-containers").innerHTML=html;
-
-// 個人戦用のリスト描画
-let soloHtml = `<div style="border:1px solid #ddd; padding:8px; border-radius:6px;" id="solo-group">` +
-players.map((n, idx)=>{
-  return `<div style="display:flex; justify-content:space-between; align-items:center; margin:4px 0;" class="solo-item">` +
-  `<label style="margin:0;"><input type="checkbox" value="${esc(n)}" checked> ${esc(n)}</label>` +
-  `<div><button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortSolo(this, 'up')">▲</button>` +
-  `<button type="button" class="sub" style="font-size:12px;padding:2px 6px;margin-left:4px;" onclick="window.sortSolo(this, 'down')">▼</button></div>` +
-  `</div>`;
-}).join("") + `</div>`;
-$("solo-containers").innerHTML = soloHtml;
+function getActiveMembersInOtherSets() {
+  if(!data || !data.sets) return new Set();
+  const activeNames = new Set();
+  data.sets.forEach(set => {
+    const S = summarize(set);
+    if(!S.over) {
+      set.sides.forEach(s => {
+        s.players.forEach(p => activeNames.add(p));
+      });
+    }
+  });
+  return activeNames;
 }
 
-// チームの並び替え
+function updateTeamCheckboxes(){
+  if(!data)return;
+  const count = 2; // チーム数は常に2
+  const players=data.players;
+  const busyMembers = getActiveMembersInOtherSets();
+
+  if(!teamAssignments[count]) {
+    teamAssignments[count] = {};
+  }
+
+  const existingCards = document.querySelectorAll(".team-card");
+  if(existingCards.length > 0) {
+    existingCards.forEach((card, i) => {
+      card.querySelectorAll(".team-member-item").forEach(item => {
+        const chk = item.querySelector("input[type=checkbox]");
+        const nameVal = item.dataset.name;
+        if(chk && chk.checked && nameVal) {
+          teamAssignments[count][nameVal] = i;
+        }
+      });
+    });
+  }
+
+  const assignedMembers = new Set();
+  Object.keys(teamAssignments[count]).forEach(n => {
+    if(teamAssignments[count][n] !== null && teamAssignments[count][n] !== undefined) {
+      assignedMembers.add(n);
+    }
+  });
+
+  let html="";
+  for(let i=0; i<count; i++){
+    const teamName=teamNamesDefault[i] || `チーム${i+1}`;
+    html+=`<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px;" class="team-card" data-index="${i}">
+      <b>${teamName}</b>
+      <button type="button" class="sub" style="font-size:12px;padding:2px 6px;float:right;" onclick="window.sortTeam(${i}, 'up')">[UP]</button>
+      <button type="button" class="sub" style="font-size:12px;padding:2px 6px;float:right;margin-right:4px;" onclick="window.sortTeam(${i}, 'down')">[DOWN]</button>
+      <div class="chk team-chk-group" style="margin-top:6px;">` +
+      players.map(n => {
+        const isBusy = busyMembers.has(n);
+        const isHere = (teamAssignments[count][n] === i);
+        if(isBusy && !isHere) return '';
+        return `<label style="display:${isHere ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin:4px 0;" class="team-member-item" data-name="${esc(n)}">
+          <div><input type="checkbox" value="${esc(n)}" ${isHere?"checked":""} onchange="window.handleTeamCheckboxChange(this, ${count})"> ${esc(n)}</div>
+          <div><button type="button" class="sub" style="font-size:11px;padding:1px 5px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
+          <button type="button" class="sub" style="font-size:11px;padding:1px 5px;margin-left:2px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button></div>
+        </label>`;
+      }).join("") + `</div>
+      <div style="margin-top:6px;"><select onchange="window.addMemberToTeam(${i}, this, ${count})" style="font-size:13px;padding:4px;"><option value="">＋ メンバーを追加</option>` +
+      players.map(n => {
+        if(assignedMembers.has(n) || busyMembers.has(n)) return '';
+        return `<option value="${esc(n)}">${esc(n)}</option>`;
+      }).join("") +
+      `</select></div>
+    </div>`;
+  }
+  $("team-containers").innerHTML=html;
+
+  let soloHtml = `<div style="border:1px solid #ddd; padding:8px; border-radius:6px;" id="solo-group">` +
+    players.map((n)=>{
+      const isBusy = busyMembers.has(n);
+      if(isBusy) {
+        return `<div style="margin:4px 0;" class="solo-item"><span class="disabled-member">🔒 ${esc(n)}（他の進行中セットに出場中）</span></div>`;
+      }
+      return `<div style="display:flex; justify-content:space-between; align-items:center; margin:4px 0;" class="solo-item">` +
+        `<label style="margin:0;"><input type="checkbox" value="${esc(n)}" checked> ${esc(n)}</label>` +
+        `<div><button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortSolo(this, 'up')">[UP]</button>` +
+        `<button type="button" class="sub" style="font-size:12px;padding:2px 6px;margin-left:4px;" onclick="window.sortSolo(this, 'down')">[DOWN]</button></div>` +
+        `</div>`;
+    }).join("") +
+    `</div>`;
+  $("solo-containers").innerHTML = soloHtml;
+}
+
+// 匿名対戦チーム（白チーム）を追加する機能
+$("add-opponent-btn").onclick = () => {
+  if(!data) return;
+  const count = 2;
+  const size = parseInt($("opponent-size.value") || $("opponent-size").value) || 2;
+  
+  if(!teamAssignments[count]) teamAssignments[count] = {};
+  
+  // 白チーム（index 1）の既存メンバーをクリアして、指定人数分の「白チームの〇人目」を生成
+  Object.keys(teamAssignments[count]).forEach(n => {
+    if(teamAssignments[count][n] === 1) {
+      delete teamAssignments[count][n];
+    }
+  });
+
+  for(let j=1; j<=size; j++) {
+    const fakeName = `白チームの${j}人目`;
+    if(!data.players.includes(fakeName)) data.players.push(fakeName);
+    teamAssignments[count][fakeName] = 1;
+  }
+  
+  updateTeamCheckboxes();
+};
+
+window.handleTeamCheckboxChange = (chkElem, count) => {
+  const item = chkElem.closest(".team-member-item");
+  if(item) {
+    const nameVal = item.dataset.name;
+    if(!chkElem.checked) {
+      if(teamAssignments[count]) {
+        delete teamAssignments[count][nameVal];
+      }
+      item.style.display = "none";
+      updateTeamCheckboxes();
+    }
+  }
+};
+
+window.addMemberToTeam = (teamIndex, selectElem, count) => {
+  const memberName = selectElem.value;
+  if(!memberName) return;
+  selectElem.value = "";
+
+  if(!teamAssignments[count]) teamAssignments[count] = {};
+  teamAssignments[count][memberName] = teamIndex;
+
+  updateTeamCheckboxes();
+};
+
 window.sortTeam = (index, direction) => {
   const container = $("team-containers");
   const cards = [...container.querySelectorAll(".team-card")];
@@ -236,11 +462,22 @@ window.sortTeam = (index, direction) => {
     if(prev) container.insertBefore(targetCard, prev);
   } else {
     const next = targetCard.nextElementSibling;
-    if(next) container.insertBefore(next, targetCard);
+    if(next) container.insertBefore(targetCard, next.nextElementSibling);
   }
 };
 
-// 個人戦のプレイヤーの並び替え
+window.sortTeamMember = (btn, direction) => {
+  const item = btn.closest(".next-member-item") || btn.closest(".team-member-item");
+  if(!item) return;
+  if(direction === 'up') {
+    const prev = item.previousElementSibling;
+    if(prev) item.parentNode.insertBefore(item, prev);
+  } else {
+    const next = item.nextElementSibling;
+    if(next) item.parentNode.insertBefore(next, item);
+  }
+};
+
 window.sortSolo = (btn, direction) => {
   const item = btn.closest(".solo-item");
   if(!item) return;
@@ -253,7 +490,27 @@ window.sortSolo = (btn, direction) => {
   }
 };
 
-$("teamcount").oninput=updateTeamCheckboxes;
+function renderNextOrderForm(set) {
+  const lastMatchSides = set.matches[set.matches.length-1].customSides || set.sides;
+  const isTeam = (set.type === "team");
+  if(!isTeam) return;
+
+  let html = lastMatchSides.map((s, idx) => {
+    return `<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px; background:#fff;" class="next-team-card" data-side-index="${idx}">
+      <b>${esc(s.name)}</b>
+      <div style="margin-top:6px;">` +
+      s.players.map(p => {
+        return `<div style="display:flex; justify-content:space-between; align-items:center; margin:4px 0;" class="next-member-item" data-member="${esc(p)}">
+          <span>${esc(p)}</span>
+          <div>
+            <button type="button" class="sub" style="font-size:11px;padding:1px 5px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
+            <button type="button" class="sub" style="font-size:11px;padding:1px 5px;margin-left:2px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button>
+          </div>
+        </div>`;
+      }).join("") + `</div></div>`;
+  }).join("");
+  $("next-order-container").innerHTML = html;
+};
 
 function getTeamSides(){
   const cards = document.querySelectorAll(".team-card");
@@ -261,7 +518,10 @@ function getTeamSides(){
   cards.forEach((card,i)=>{
     const bTag = card.querySelector("b");
     const teamName = bTag ? bTag.textContent : `チーム${i+1}`;
-    const names = [...card.querySelectorAll("input:checked")].map(c=>c.value);
+    const names = [...card.querySelectorAll(".team-member-item")].map(item => {
+      const chk = item.querySelector("input[type=checkbox]");
+      return (chk && chk.checked && item.style.display !== "none") ? item.dataset.name : null;
+    }).filter(Boolean);
     if(names.length>0){sides.push({name:teamName, players:names});}
   });
   return sides;
@@ -279,165 +539,350 @@ function getSoloSides(){
   return sides;
 }
 
-$("create").onclick=async()=>{const players=splitNames($("players").value);
-if(players.length<2){alert("参加者を2人以上入力してください");return;}
-const code=String(Math.floor(1000+Math.random()*9000));
-await setDoc(doc(db,"rooms",code),{players,sets:[],created:Date.now()});
-enter(code);
+$("create").onclick=async()=>{
+  const checkedBoxes = document.querySelectorAll(".home-member-chk:checked");
+  const players = [...checkedBoxes].map(chk => chk.value.trim()).filter(Boolean);
+  
+  if(players.length < 2){alert("参加者を2人以上選択してください");return;}
+  const code=String(Math.floor(1000+Math.random()*9000));
+  await setDoc(doc(db,"rooms",code),{players,sets:[],created:Date.now()});
+  enter(code);
 };
+
 $("join").onclick=()=>{const c=$("code").value.trim();if(c)enter(c);};
 $("leave").onclick=()=>{if(unsub)unsub();location.hash="";location.reload();};
 if(location.hash.length>1)enter(location.hash.slice(1));
 
-function enter(code){room=code;location.hash=code;
-$("home").classList.add("hide");$("game").classList.remove("hide");$("rc").textContent=code;
-unsub=onSnapshot(doc(db,"rooms",code),s=>{const d=s.exists()?s.data():null;
-if(!d||!Array.isArray(d.sets)){alert("部屋が見つかりません");$("leave").onclick();return;}
-if(firstSnap){firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";}
-else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";}
-if(cur>=d.sets.length)cur=d.sets.length-1;
-if(cur<0&&view==="set")view="new";
-prevLen=d.sets.length;data=d;render();
-});
+function enter(code){
+  room=code;location.hash=code;
+  $("home").classList.add("hide");$("game").classList.remove("hide");$("rc").textContent=code;
+  unsub=onSnapshot(doc(db,"rooms",code),s=>{
+    const d=s.exists()?s.data():null;
+    if(!d||!Array.isArray(d.sets)){alert("部屋が見つかりません");$("leave").onclick();return;}
+    if(firstSnap){firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";}
+    else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderingNextMatch=false;}
+    if(cur>=d.sets.length)cur=d.sets.length-1;
+    if(cur<0&&view==="set")view="new";
+    prevLen=d.sets.length;data=d;render();
+  });
 }
 
 $("restrict-my-turn").onchange = () => { render(); };
 
 async function mutate(fn){
-  await runTransaction(db,async tx=>{const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
-  if(fn(d)===false)return;
-  tx.update(ref,{players:d.players,sets:d.sets});
-});}
+  await runTransaction(db,async tx=>{
+    const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
+    if(fn(d)===false)return;
+    tx.update(ref,{players:d.players,sets:d.sets});
+  });
+}
+
 const findSet=(d,id)=>d.sets.find(x=>x.id===id);
-$("ntype").onchange=()=>{const solo=$("ntype").value==="solo";
-$("n-team").classList.toggle("hide",solo);$("n-solo").classList.toggle("hide",!solo);
-$("ngames").value=solo?1:3;
+
+$("ntype").onchange=()=>{
+  const solo=$("ntype").value==="solo";
+  $("n-team").classList.toggle("hide",solo);
+  $("n-solo").classList.toggle("hide",!solo);
+  $("ngames").value=solo?1:3;
 };
+
 $("nmode").onchange=()=>{$("nglabel").textContent=$("nmode").value==="first"?"何勝先取？":"試合数";};
+
 function newSetId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
-async function createSet(set){const names=set.sides.flatMap(s=>s.players);
-if(uniq(names).length!==names.length){alert("同じ名前が複数のチームに入っています");return;}
-const n=set.sides.length;
-let firstStart=0;
-const firstGameRule=$("nfirstgame")?$("nfirstgame").value:"order";
-if(firstGameRule==="shuffle"){firstStart=Math.floor(Math.random()*n);}
-else if(firstGameRule==="reverse"){firstStart=n-1;}
 
-await mutate(d=>{names.forEach(n=>{if(!d.players.includes(n))d.players.push(n);});
-const cnt=d.sets.filter(x=>x.type===set.type).length+1;
-d.sets.push({...set,id:newSetId(),name:(set.type==="team"?"団体戦":"個人戦")+cnt,matches:[{start:firstStart,throws:[]}]});
-});
+async function createSet(set){
+  const names=set.sides.flatMap(s=>s.players);
+  if(uniq(names).length!==names.length){alert("同じ名前が複数のチームに入っています");return;}
+  const n=set.sides.length;
+  let firstStart=0;
+  const firstGameRule=$("nfirstgame")?$("nfirstgame").value:"order";
+  if(firstGameRule==="shuffle"){
+    firstStart=Math.floor(Math.random()*n);
+  } else if(firstGameRule==="reverse"){
+    firstStart=n-1;
+  } else if(firstGameRule==="custom"){
+    if(set.type === "solo"){
+      const sortedNames = getSoloSides().map(s => s.name);
+      set.sides.sort((a, b) => sortedNames.indexOf(a.name) - sortedNames.indexOf(b.name));
+    }
+    firstStart=0;
+  }
+  await mutate(d=>{
+    names.forEach(n=>{if(!d.players.includes(n))d.players.push(n);});
+    const cnt=d.sets.filter(x=>x.type===set.type).length+1;
+    d.sets.push({...set,id:newSetId(),name:(set.type==="team"?"団体戦":"個人戦")+cnt,matches:[{start:firstStart,throws:[]}]});
+  });
 }
-$("mkset").onclick=()=>{const type=$("ntype").value;let sides;
-if(type==="team"){sides=getTeamSides();}
-else{sides=getSoloSides();}
-if(sides.length<2){alert("2つ以上のサイド（メンバー）を選んでください");return;}
-const games=Math.max(1,Math.min(99,parseInt($("ngames").value)||1));
-createSet({type,sides,mode:$("nmode").value,games,firstRule:$("nfirst").value});
+
+$("mkset").onclick=()=>{
+  const type=$("ntype").value;let sides;
+  if(type==="team"){sides=getTeamSides();} else{sides=getSoloSides();}
+  if(sides.length<2){alert("2つ以上のサイド（メンバー）を選んでください");return;}
+  const games=Math.max(1,Math.min(99,parseInt($("ngames").value)||1));
+  isOrderingNextMatch = false;
+  createSet({type,sides,mode:$("nmode").value,games,firstRule:$("nfirst").value});
 };
-$("copyset").onclick=()=>{const l=data.sets[data.sets.length-1];
-if(!l){alert("コピーできる前のセットがありません");return;}
-createSet({type:l.type,sides:l.sides,mode:l.mode,games:l.games,firstRule:l.firstRule});
+
+$("copyset").onclick=()=>{
+  const l=data.sets[data.sets.length-1];
+  if(!l){alert("コピーできる前のセットがありません");return;}
+  isOrderingNextMatch = false;
+  createSet({type:l.type,sides:l.sides,mode:l.mode,games:l.games,firstRule:l.firstRule});
 };
-$("addbtn").onclick=async()=>{const n=$("addname").value.trim();if(!n)return;
-await mutate(d=>{if(d.players.includes(n))return false;d.players.push(n);});
-$("addname").value="";
+
+$("addbtn").onclick=async()=>{
+  const n=$("addname").value.trim();if(!n)return;
+  await mutate(d=>{if(d.players.includes(n))return false;d.players.push(n);});
+  $("addname").value="";
 };
+
 $("me").onchange=()=>{localStorage.me=$("me").value;render();};
+
 async function add(pts){
-  if(!isMyTurn()){ alert("現在あなたのチーム（またはあなた）の番ではありません。"); return; }
+  if(!isMyTurn()){
+    alert("現在あなたのチーム（またはあなた）の番ではありません。");
+    return;
+  }
   const set=data.sets[cur],sid=set.id,mi=set.matches.length,n=set.matches[mi-1].throws.length;
-  await mutate(d=>{const s=findSet(d,sid);
-  if(!s||s.matches.length!==mi||s.matches[mi-1].throws.length!==n)return false;
-  s.matches[mi-1].throws.push(pts);
-});}
+  await mutate(d=>{
+    const s=findSet(d,sid);
+    if(!s||s.matches.length!==mi||s.matches[mi-1].throws.length!==n)return false;
+    s.matches[mi-1].throws.push(pts);
+  });
+}
+
 $("pad").innerHTML=[...Array(13).keys()].map(i=>`<button data-p="${i}">${i}</button>`).join("");
-$("pad").onclick=e=>{const p=e.target.dataset.p;if(p===undefined||!data||cur<0)return;
-const S=summarize(data.sets[cur]);
-if(!S.curDone&&!S.over)add(+p);
+$("pad").onclick=e=>{
+  const p=e.target.dataset.p;if(p===undefined||!data||cur<0)return;
+  const S=summarize(data.sets[cur]);
+  if(!S.curDone&&!S.over)add(+p);
 };
-$("undo").onclick=()=>{const sid=data.sets[cur].id;
-return mutate(d=>{const s=findSet(d,sid);if(!s)return false;
-const last=s.matches[s.matches.length-1];
-if(last.throws.length)last.throws.pop();
-else if(s.matches.length>1)s.matches.pop();
-else return false;});
-};
-$("next").onclick=()=>{const set=data.sets[cur],sid=set.id,mi=set.matches.length;
-return mutate(d=>{const s=findSet(d,sid);
-if(!s||s.matches.length!==mi)return false;
-s.matches.push({start:nextStart(s),throws:[]});});
-};
-$("delset").onclick=()=>{const sid=data.sets[cur].id;
-if(!confirm("このセットを削除します（元に戻せません）。よろしいですか？"))return;
-return mutate(d=>{d.sets=d.sets.filter(x=>x.id!==sid);});
-};
-$("copystats").onclick=async()=>{const rows=[["名前","試合数","勝","勝率","セット優勝","投球数","合計点","平均点/投","0点回数"]];
-tally(data).forEach(t=>rows.push([t.name,t.played,t.win,t.played?(t.win/t.played).toFixed(3):"",t.setWin,t.n,t.pts,t.n?(t.pts/t.n).toFixed(2):"",t.zero]));
-const txt=rows.map(r=>r.join("\t")).join("\n");
-try{await navigator.clipboard.writeText(txt);alert("コピーしました。Excelに貼り付けてください。");}
-catch(e){prompt("コピーして Excel に貼り付けてください",txt);}
-};
-document.getElementById("tabs").onclick=e=>{const v=e.target.dataset.v;if(!v)return;
-if(v==="new"||v==="stats"){view=v;}else{view="set";cur=+v;}
-render();
-};
-const MODE={fixed:"勝利数で決定",first:"先取り",total:"合計得点で決定"};
-function render(){const d=data,sets=d.sets;
-const s2=d.players.join("|");
-if(s2!==sig){sig=s2;
-$("me").innerHTML='<option value="">（観戦）</option>'+d.players.map(n=>`<option>${esc(n)}</option>`).join("");
-updateTeamCheckboxes();
-}
-$("me").value=localStorage.me||"";
-$("tabs").innerHTML=sets.map((s,i)=>`<button class="tab ${view==="set"&&cur===i?"on":""}" data-v="${i}">${esc(s.name)}</button>`).join("")+
-`<button class="tab ${view==="new"?"on":""}" data-v="new">＋新しいセット</button>`+
-`<button class="tab ${view==="stats"?"on":""}" data-v="stats">📊通算成績</button>`;
-$("v-new").classList.toggle("hide",view!=="new");
-$("v-set").classList.toggle("hide",view!=="set");
-$("v-stats").classList.toggle("hide",view!=="stats");
 
-if(view==="set")renderSet(sets[cur]);
-if(view==="stats")renderStats();
-}
-function renderSet(set){const {sides}=set,S=summarize(set),cur=S.cur,k=set.matches.length;
-const isTeam=(set.type==="team");
-$("setname").textContent=set.name;
-$("setinfo").textContent=set.mode==="first" ? `${set.games}勝先取（${MODE.first}）｜第${k}試合` : `全${set.games}試合（${MODE[set.mode]}）｜第${Math.min(k,set.games)}試合`;
-$("final").innerHTML=S.over ? `<div class="banner">🏆 セット優勝：${S.winners.map(i=>esc(sides[i].name)).join("・")}${S.note}</div>`:"";
-$("board").innerHTML=sides.map((s,i)=>{const cls=cur.winner===i?"side win":(!S.curDone&&!S.over&&cur.turn===i?"side now":"side");
-const stSide=cur.st[i];
-const pl=s.players.map((p,j)=>{const q=stSide.players[j];
-return `<span class="${!isTeam&&q.out?"out":""}">${esc(p)}${!isTeam&&q.miss?"（連続"+q.miss+"ミス）":""}</span>`}).join(" ");
-const missInfo = isTeam && stSide.teamMiss > 0 ? `（チーム連続${stSide.teamMiss}ミス）` : "";
-const teamOutCls = isTeam && stSide.teamOut ? "out" : "";
-return `<div class="card ${cls}"><div><b class="${teamOutCls}">${esc(s.name)}${missInfo}</b><div class="pl">${pl}</div></div>
-<div class="score">${stSide.score}<small>${S.wins[i]}勝｜合計${S.total[i]}点</small></div></div>`;
-}).join("");
+$("undo").onclick=()=>{
+  const sid=data.sets[cur].id;
+  return mutate(d=>{
+    const s=findSet(d,sid);if(!s)return false;
+    const last=s.matches[s.matches.length-1];
+    if(last.throws.length)last.throws.pop();
+    else if(s.matches.length>1)s.matches.pop();
+    else return false;
+  });
+};
 
-const myTurn = isMyTurn();
-$("pad").style.display = myTurn ? "grid" : "none";
-$("input-lock-msg").style.display = myTurn ? "none" : "block";
+$("next").onclick=()=>{
+  const set=data.sets[cur];
+  if(set.type === "team" && !isOrderingNextMatch) {
+    isOrderingNextMatch = true;
+    render();
+    return;
+  }
+  proceedToNextMatch(null);
+};
 
-if(S.over)$("turn").textContent="セット終了";
-else if(S.curDone)$("turn").textContent="この試合は "+sides[cur.winner].name+" の勝ち！";
-else{const who=sides[cur.turn].players[cur.who];
-$("turn").textContent="次: "+who+(who===$("me").value?"（あなたの番です！）":"");}
-$("next").classList.toggle("hide",!(S.curDone&&!S.over));
-$("results").innerHTML="<table><tr><th>試合</th><th>先攻</th>"+sides.map(s=>`<th>${esc(s.name)}</th>`).join("")+"<th>勝者</th></tr>"+
-S.res.map((r,mi)=>`<tr><td>${mi+1}</td><td>${esc(sides[set.matches[mi].start].name)}</td>`+
-r.st.map(x=>`<td>${x.score}</td>`).join("")+`<td>${r.winner===null?"進行中":esc(sides[r.winner].name)}</td></tr>`).join("")+"</table>";
-const m=set.matches[k-1],h=[];
-for(let t=1;t<=m.throws.length;t++){const rr=replay(sides,m.throws.slice(0,t),m.start,isTeam);
-h.push(t+"投目 → "+m.throws[t-1]+"点（"+rr.st.map((x,i)=>esc(sides[i].name)+" "+x.score).join(" / ")+"）");}
-$("log").innerHTML=h.reverse().join("<br>");
+$("save-order").onclick = () => {
+  const set = data.sets[cur];
+  const nextTeamCards = document.querySelectorAll(".next-team-card");
+  const newCustomSides = [];
+  nextTeamCards.forEach((card, idx) => {
+    const origSide = set.sides[idx];
+    const memberItems = card.querySelectorAll(".next-member-item");
+    const newPlayers = [...memberItems].map(item => item.dataset.member);
+    newCustomSides.push({name: origSide.name, players: newPlayers});
+  });
+  proceedToNextMatch(newCustomSides);
+};
+
+async function proceedToNextMatch(customSides) {
+  const set=data.sets[cur],sid=set.id,mi=set.matches.length;
+  isOrderingNextMatch = false;
+  stopTimer();
+  timerSeconds = 0;
+  updateTimerDisplay();
+  await mutate(d=>{
+    const s=findSet(d,sid);
+    if(!s||s.matches.length!==mi)return false;
+    const nextStartPlayer = nextStart(s);
+    const newMatch = {start: nextStartPlayer, throws: []};
+    if(customSides) {
+      newMatch.customSides = customSides;
+    }
+    s.matches.push(newMatch);
+  });
 }
-function renderStats(){const T=tally(data);
-$("stats").innerHTML="<table><tr><th class='l'>名前</th><th>試合</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>平均点</th><th>0点</th></tr>"+
-T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td></tr>`).join("")+"</table>"+
-"<p class='pl'>「試合」「勝」は決着した試合だけ。平均点は1投あたりの得点です。</p>";
-$("setlist").innerHTML=data.sets.length?"<table><tr><th class='l'>セット</th><th>状況</th><th>優勝</th></tr>"+
-data.sets.map(s=>{const S=summarize(s);return `<tr><td class="l">${esc(s.name)}</td><td>${S.over?"終了":"進行中"}（${S.played}試合）</td><td>${S.over?S.winners.map(i=>esc(s.sides[i].name)).join("・"):"-"}</td></tr>`;}).join("")+"</table>":"まだセットがありません";
+
+$("delset").onclick=()=>{
+  const sid=data.sets[cur].id;
+  if(!confirm("このセットを削除します（元に戻せません）。よろしいですか？"))return;
+  stopTimer();
+  return mutate(d=>{d.sets=d.sets.filter(x=>x.id!==sid);});
+};
+
+$("copystats").onclick=async()=>{
+  const rows=[["名前","試合数","勝","勝率","セット優勝","投球数","合計点","平均点/投","0点回数"]];
+  tally(data).forEach(t=>rows.push([t.name,t.played,t.win,t.played?(t.win/t.played).toFixed(3):"",t.setWin,t.n,t.pts,t.n?(t.pts/t.n).toFixed(2):"",t.zero]));
+  const txt=rows.map(r=>r.join("\t")).join("\n");
+  try{await navigator.clipboard.writeText(txt);alert("コピーしました。Excelに貼り付けてください。");}
+  catch(e){prompt("コピーして Excel に貼り付けてください",txt);}
+};
+
+document.getElementById("tabs").onclick=e=>{
+  const v=e.target.dataset.v;if(!v)return;
+  stopTimer();
+  if(v==="new"||v==="stats"){view=v; isOrderingNextMatch=false;}else{view="set";cur=+v; isOrderingNextMatch=false;}
+  render();
+};
+
+const MODE={fixed:"勝利数-決定",first:"先取り",total:"合計得点で決定"};
+
+$("timer-start-btn").onclick = () => {
+  if (isTimerRunning) {
+    stopTimer();
+    $("timer-start-btn").textContent = "スタート";
+    $("timer-start-btn").style.background = "#3b6ea8";
+  } else {
+    startTimer();
+    $("timer-start-btn").textContent = "一時停止";
+    $("timer-start-btn").style.background = "#888";
+  }
+};
+
+$("timer-reset-btn").onclick = () => {
+  stopTimer();
+  timerSeconds = 0;
+  updateTimerDisplay();
+  $("timer-start-btn").textContent = "スタート";
+  $("timer-start-btn").style.background = "#3b6ea8";
+};
+
+function startTimer() {
+  if (matchTimerInterval) clearInterval(matchTimerInterval);
+  isTimerRunning = true;
+  matchTimerInterval = setInterval(() => {
+    timerSeconds++;
+    updateTimerDisplay();
+  }, 1000);
 }
-</script></body>
+
+function stopTimer() {
+  if (matchTimerInterval) {
+    clearInterval(matchTimerInterval);
+    matchTimerInterval = null;
+  }
+  isTimerRunning = false;
+}
+
+function updateTimerDisplay() {
+  const timerElem = $("match-timer-display");
+  if (!timerElem) return;
+  const mins = Math.floor(timerSeconds / 60).toString().padStart(2, '0');
+  const secs = (timerSeconds % 60).toString().padStart(2, '0');
+  timerElem.textContent = `⏱️ ${mins}:${secs}`;
+}
+
+function render(){
+  const d=data,sets=d.sets;
+  const s2=d.players.join("|");
+  if(s2!==sig){
+    sig=s2;
+    $("me").innerHTML='<option value="">（観戦）</option>'+d.players.map(n=>`<option>${esc(n)}</option>`).join("");
+    updateTeamCheckboxes();
+  }
+  $("me").value=localStorage.me||"";
+  $("tabs").innerHTML=sets.map((s,i)=>`<button class="tab ${view==="set"&&cur===i?"on":""}" data-v="${i}">${esc(s.name)}</button>`).join("")+
+    `<button class="tab ${view==="new"}" data-v="new">＋新しいセット</button>`+
+    `<button class="tab ${view==="stats"}" data-v="stats">📊通算成績</button>`;
+
+  document.querySelectorAll("#tabs button").forEach(btn => {
+    const v = btn.dataset.v;
+    const isActive = (view === "set" && cur.toString() === v) || (view === v);
+    btn.classList.toggle("on", isActive);
+  });
+
+  $("v-new").classList.toggle("hide",view!=="new");
+  $("v-set").classList.toggle("hide",view!=="set");
+  $("v-stats").classList.toggle("hide",view!=="stats");
+
+  if(view==="set")renderSet(sets[cur]);
+  if(view==="stats") {
+    stopTimer();
+    renderStats();
+  }
+}
+
+function renderSet(set){
+  const S=summarize(set),cur=S.cur,k=set.matches.length;
+  const activeSides = set.matches[k-1].customSides || set.sides;
+  const isTeam=(set.type==="team");
+
+  $("setname").textContent=set.name;
+  $("setinfo").textContent=set.mode==="first" ? `${set.games}勝先取（${MODE.first}）｜第${k}試合` : `全${set.games}試合（${MODE[set.mode]}）｜第${Math.min(k,set.games)}試合`;
+
+  $("final").innerHTML=S.over ? `<div class="banner">🏆 セット優勝：${S.winners.map(i=>esc(set.sides[i].name)).join("・")}${S.note}</div>`:"";
+  
+  $("board").innerHTML=activeSides.map((s,i)=>{
+    const cls=cur.winner===i?"side win":(!S.curDone&&!S.over&&cur.turn===i?"side now":"side");
+    const stSide=cur.st[i];
+    
+    const pl=s.players.map((p,j)=>{
+      const q=stSide.players[j];
+      const historyStr = q.history.length > 0 ? ` [${q.history.join(",")}]` : "";
+      return `<span class="${!isTeam&&q.out?"out":""}">${esc(p)}${historyStr}${!isTeam&&q.miss?"（連続"+q.miss+"ミス）":""}</span>`;
+    }).join(" ");
+
+    const teamHistoryStr = stSide.throwsHistory.length > 0 ? `<div class="throw-history">履歴: ${stSide.throwsHistory.join(", ")}</div>` : "";
+    const missInfo = isTeam && stSide.teamMiss > 0 ? `（チーム連続${stSide.teamMiss}ミス）` : "";
+    const teamOutCls = isTeam && stSide.teamOut ? "out" : "";
+
+    return `<div class="card ${cls}"><div><b class="${teamOutCls}">${esc(s.name)}${missInfo}</b><div class="pl">${pl}</div>${teamHistoryStr}</div> <div class="score">${stSide.score}<small>${S.wins[i]}勝｜合計${S.total[i]}点</small></div></div>`;
+  }).join("");
+
+  if(isOrderingNextMatch && S.curDone && !S.over) {
+    stopTimer();
+    $("match-order-card").style.display = "block";
+    $("pad-area").style.display = "none";
+    renderNextOrderForm(set);
+  } else {
+    $("match-order-card").style.display = "none";
+    $("pad-area").style.display = "block";
+  }
+
+  const myTurn = isMyTurn();
+  $("pad").style.display = myTurn ? "grid" : "none";
+  $("input-lock-msg").style.display = myTurn ? "none" : "block";
+
+  if(S.over){
+    stopTimer();
+    $("turn").textContent="セット終了";
+  }
+  else if(S.curDone)$("turn").textContent="この試合は "+activeSides[cur.winner].name+" の勝ち！";
+  else{const who=activeSides[cur.turn].players[cur.who]; $("turn").textContent="次: "+who+(who===$("me").value?"（あなたの番です！）":"");}
+
+  $("next").classList.toggle("hide",!(S.curDone&&!S.over));
+
+  $("results").innerHTML="<table><tr><th>試合</th><th>先攻</th>"+set.sides.map(s=>`<th>${esc(s.name)}</th>`).join("")+"<th>勝者</th></tr>"+
+    S.res.map((r,mi)=>{
+      const mSides = set.matches[mi].customSides || set.sides;
+      return `<tr><td>${mi+1}</td><td>${esc(mSides[set.matches[mi].start].name)}</td>`+
+      r.st.map(x=>`<td>${x.score}</td>`).join("")+`<td>${r.winner===null?"進行中":esc(mSides[r.winner].name)}</td></tr>`;
+    }).join("")+"</table>";
+
+  const m=set.matches[k-1],historyLogs=[];
+  for(let t=1;t<=m.throws.length;t++){
+    const rr=replay(activeSides,m.throws.slice(0,t),m.start,isTeam);
+    historyLogs.push(t+"投目 → "+m.throws[t-1]+"点（"+rr.st.map((x,i)=>esc(activeSides[i].name)+" "+x.score).join(" / ")+"）");
+  }
+  $("log").innerHTML=historyLogs.reverse().join("<br>");
+}
+
+function renderStats(){
+  stopTimer();
+  const T=tally(data);
+  $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>試合</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>平均点</th><th>0点</th></tr>"+
+    T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td></tr>`).join("")+"</table>"+
+    "<p class='pl'>「試合」「勝」は決着した試合だけ。平均点は1投あたりの得点です。</p>";
+  $("setlist").innerHTML=data.sets.length?"<table><tr><th class='l'>セット</th><th>状況</th><th>優勝</th></tr>"+
+    data.sets.map(s=>{const S=summarize(s);return `<tr><td class="l">${esc(s.name)}</td><td>${S.over?"終了":"進行中"}（${S.played}試合）</td><td>${S.over?S.winners.map(i=>esc(s.sides[i].name)).join("・"):"-"}</td></tr>`;}).join("")+"</table>":"まだセットがありません";
+}
+</script>
+</body>
 </html>
