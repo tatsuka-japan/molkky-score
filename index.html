@@ -50,7 +50,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.11 修正版</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.12 修正版</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -878,7 +878,8 @@ async function createSet(set){
         
         let initialSides = [set.sides[0], set.sides[1]];
         if(set.type === "team" && set.sides.length >= 2) {
-          initialSides = [set.sides[0], set.sides[1]];
+          // 団体戦は選択した全チームが同じ1試合に参加する
+          initialSides = [...set.sides];
         } else if(set.type === "solo" && set.sides.length >= 2) {
           const rotatedSides = [...set.sides];
           for(let r=0; r<g; r++) { rotatedSides.push(rotatedSides.shift()); }
