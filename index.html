@@ -50,7 +50,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.10</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.11 修正版</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -89,7 +89,7 @@ td.l,th.l{text-align:left}
 <label>種類 <select id="ntype">
 <option value="team">団体戦（チーム対抗）</option>
 <option value="solo">個人戦（フリー）</option>
-<option value="tournament">個人戦（トーナメント / 負けても2試合以上・4人以上）</option>
+<option value="tournament">個人戦（トーナメント / 4～8人・負けても2試合以上）</option>
 <option value="league">個人戦（総当たりリーグ）</option>
 </select></label>
 <div id="n-team">
@@ -129,8 +129,8 @@ td.l,th.l{text-align:left}
 <div id="tournament-setting-box" class="hide" style="background:#eef4fb; padding:8px; border-radius:8px; margin:8px 0;">
 <label>トーナメントの対戦ルール <select id="ntournament-mode">
 <option value="game1">① 1本勝負（1ゲーム先取で勝ち抜け）</option>
-<option value="game2_wins">② 2本先取（2ゲーム先取した方の勝ち抜け）</option>
-<option value="match2_total">③ 2試合の合計得点勝負（2試合の合計スコアが多い方の勝ち抜け）</option>
+<option value="game2_wins">② 2本先取（最大3ゲーム、2勝で勝ち抜け）</option>
+<option value="match2_total">③ 2試合の合計得点（同点なら第3ゲーム）</option>
 </select></label>
 </div>
 <label>0点3回連続のルール <select id="nmissrule">
@@ -318,28 +318,34 @@ $("ntype").onchange=()=>{
   $("tournament-setting-box").classList.toggle("hide", type !== "tournament");
 };
 
+function getGameThrows(match, gameIndex) {
+  const key = `game${gameIndex + 1}`;
+  return Array.isArray(match[key]) ? match[key] : [];
+}
+
 function getMatchWinner(m, missRule, overRule) {
   const customSides = m.customSides || m.sides;
   const mode = m.tournamentMode || "game1";
-  const g1 = Array.isArray(m.game1) ? m.game1 : [];
-  const g2 = Array.isArray(m.game2) ? m.game2 : [];
+  const g1 = getGameThrows(m, 0);
+  const g2 = getGameThrows(m, 1);
+  const g3 = getGameThrows(m, 2);
 
   if (mode === "match2_total") {
     const r1 = replay(customSides, g1, m.start, false, missRule, overRule);
     const r2 = replay(customSides, g2, m.start, false, missRule, overRule);
+    if (r1.winner === null || r2.winner === null) return null;
     const scores = r1.st.map((st, i) => st.score + r2.st[i].score);
-    if (g1.length > 0 || g2.length > 0) {
-      const maxScore = Math.max(...scores);
-      const winners = scores.map((s, i) => s === maxScore ? i : -1).filter(i => i >= 0);
-      if (winners.length === 1) return winners[0];
-    }
-    return null;
+    const maxScore = Math.max(...scores);
+    const winners = scores.map((score, i) => score === maxScore ? i : -1).filter(i => i >= 0);
+    if (winners.length === 1) return winners[0];
+    const tieBreak = replay(customSides, g3, m.start, false, missRule, overRule);
+    return tieBreak.winner;
   } else if (mode === "game2_wins") {
-    const r1 = replay(customSides, g1, m.start, false, missRule, overRule);
-    const r2 = replay(customSides, g2, m.start, false, missRule, overRule);
     const wins = customSides.map(() => 0);
-    if (r1.winner !== null) wins[r1.winner]++;
-    if (r2.winner !== null) wins[r2.winner]++;
+    [g1, g2, g3].forEach(game => {
+      const result = replay(customSides, game, m.start, false, missRule, overRule);
+      if (result.winner !== null) wins[result.winner]++;
+    });
     const maxWins = Math.max(...wins);
     if (maxWins >= 2) {
       return wins.indexOf(maxWins);
@@ -365,7 +371,7 @@ function isMyTurn(){
   const m = set.matches[activeIdx] || set.matches[0];
   const customSides = m.customSides || m.sides;
   const currentGameIndex = m.currentGameIndex || 0;
-  const throwsList = currentGameIndex === 1 ? (Array.isArray(m.game2) ? m.game2 : []) : (Array.isArray(m.game1) ? m.game1 : []);
+  const throwsList = getGameThrows(m, currentGameIndex);
   const currentMatchRes = replay(customSides, throwsList, m.start, set.type==="team", set.missRule, set.overRule);
   if(currentMatchRes.winner !== null) return true;
   const currentSideIndex = currentMatchRes.turn;
@@ -398,7 +404,7 @@ function tally(room){
   (room.sets||[]).forEach(set=>{
     set.matches.forEach((m)=>{
       const matchSides = m.customSides || m.sides;
-      const gamesList = [Array.isArray(m.game1) ? m.game1 : [], Array.isArray(m.game2) ? m.game2 : []];
+      const gamesList = [getGameThrows(m, 0), getGameThrows(m, 1), getGameThrows(m, 2)];
       gamesList.forEach(gt => {
         if(gt.length === 0) return;
         const r = replay(matchSides, gt, m.start, set.type==="team", set.missRule, set.overRule);
@@ -601,7 +607,7 @@ function renderNextOrderForm(set) {
   const lastMatchSides = m.customSides || m.sides;
   
   const currentGameIndex = m.currentGameIndex || 0;
-  const throwsList = currentGameIndex === 1 ? (Array.isArray(m.game2) ? m.game2 : []) : (Array.isArray(m.game1) ? m.game1 : []);
+  const throwsList = getGameThrows(m, currentGameIndex);
   const activeMatchRes = replay(lastMatchSides, throwsList, m.start, set.type==="team", set.missRule, set.overRule);
   const descText = activeMatchRes.winner !== null 
     ? "次のゲーム（または次の試合）へ進む前に、先攻・後攻の並び順やメンバーの順番を変更できます。" 
@@ -686,9 +692,20 @@ $("create").onclick=async()=>{
   const checkedBoxes = document.querySelectorAll(".home-member-chk:checked");
   const players = [...checkedBoxes].map(chk => chk.value.trim()).filter(Boolean);
   if(players.length < 2){alert("参加者を2人以上選択してください");return;}
-  const code=String(Math.floor(1000+Math.random()*9000));
   const pass = $("new-room-pass").value.trim();
-  await setDoc(doc(db,"rooms",code),{players,sets:[],pass:pass,created:Date.now()});
+  let code = null;
+  for(let attempt=0; attempt<20 && !code; attempt++) {
+    const candidate = String(Math.floor(1000 + Math.random() * 9000));
+    const created = await runTransaction(db, async tx => {
+      const roomRef = doc(db, "rooms", candidate);
+      const existing = await tx.get(roomRef);
+      if(existing.exists()) return false;
+      tx.set(roomRef, {players, sets:[], pass, created:Date.now()});
+      return true;
+    });
+    if(created) code = candidate;
+  }
+  if(!code) { alert("部屋コードを発行できませんでした。もう一度お試しください。"); return; }
   enter(code);
 };
 
@@ -755,56 +772,61 @@ async function createSet(set){
     const totalGames = set.games || 3;
     
     if(set.type === "tournament"){
+      if(set.sides.length < 4 || set.sides.length > 8) {
+        alert("トーナメントモードは4～8人で利用できます");
+        return;
+      }
       const shuffled = shuffleArray(set.sides);
       const n = shuffled.length;
       const tournamentMode = $("ntournament-mode").value;
       
       if (n === 8) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
-        matches.push({ sides: [shuffled[4], shuffled[5]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m3" });
-        matches.push({ sides: [shuffled[6], shuffled[7]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m4" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_final" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
+        const addBracketMatch = (sides, bracket) => matches.push({ sides, start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode, bracket });
+        addBracketMatch([shuffled[0], shuffled[1]], "m1");
+        addBracketMatch([shuffled[2], shuffled[3]], "m2");
+        addBracketMatch([shuffled[4], shuffled[5]], "m3");
+        addBracketMatch([shuffled[6], shuffled[7]], "m4");
+        addBracketMatch([shuffled[0], shuffled[1]], "loser_round1");
+        addBracketMatch([shuffled[2], shuffled[3]], "loser_round2");
+        addBracketMatch([shuffled[0], shuffled[1]], "semi1");
+        addBracketMatch([shuffled[2], shuffled[3]], "semi2");
+        addBracketMatch([shuffled[0], shuffled[1]], "loser_final");
+        addBracketMatch([shuffled[0], shuffled[1]], "bronze");
+        addBracketMatch([shuffled[0], shuffled[1]], "final");
       } else if (n === 7) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
-        matches.push({ sides: [shuffled[4], shuffled[5]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m3" });
-        matches.push({ sides: [shuffled[0], shuffled[1], shuffled[2]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
-        matches.push({ sides: [shuffled[6], shuffled[0]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_final" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
+        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
+        matches.push({ sides: [shuffled[4], shuffled[5]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m3" });
+        matches.push({ sides: [shuffled[0], shuffled[1], shuffled[2]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
+        matches.push({ sides: [shuffled[6], shuffled[0]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
       } else if (n === 6) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
-        matches.push({ sides: [shuffled[4], shuffled[0]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
-        matches.push({ sides: [shuffled[5], shuffled[0]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_final" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
+        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
+        matches.push({ sides: [shuffled[4], shuffled[0]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
+        matches.push({ sides: [shuffled[5], shuffled[0]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_final" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
       } else if (n === 5) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
-        matches.push({ sides: [shuffled[4], shuffled[0]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_final" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
+        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
+        matches.push({ sides: [shuffled[4], shuffled[0]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
       } else if (n === 4) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main" });
+        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser" });
+        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
       } else {
         for(let i=0; i<n; i+=2){
           if(i+1 < n) {
             matches.push({
               sides: [shuffled[i], shuffled[i+1]],
-              start: 0, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main"
+              start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main"
             });
           }
         }
@@ -823,6 +845,7 @@ async function createSet(set){
         throws: [],
         game1: [],
         game2: [],
+        game3: [],
         currentGameIndex: 0,
         tournamentMode: "game1"
       }));
@@ -868,6 +891,7 @@ async function createSet(set){
           throws: [],
           game1: [],
           game2: [],
+          game3: [],
           currentGameIndex: 0,
           tournamentMode: "game1"
         });
@@ -890,7 +914,7 @@ $("mkset").onclick=()=>{
   const type=$("ntype").value; let sides;
   if(type==="team"){sides=getTeamSides();} else{sides=getSoloSides();}
   if(sides.length<2){alert("2つ以上のサイド（メンバー）を選んでください");return;}
-  if(type==="tournament" && sides.length < 4){alert("トーナメントモードは4人以上から参加可能です");return;}
+  if(type==="tournament" && (sides.length < 4 || sides.length > 8)){alert("トーナメントモードは4～8人で利用できます");return;}
   
   const games = Math.max(1,Math.min(99,parseInt($("ngames").value)||1));
   const missRule=$("nmissrule").value;
@@ -902,7 +926,7 @@ $("mkset").onclick=()=>{
 $("copyset").onclick=()=>{
   const l=data.sets[data.sets.length-1];
   if(!l){alert("コピーできる前のセットがありません");return;}
-  if(l.type === "tournament" && l.sides.length < 4){alert("トーナメントモードは4人以上から参加可能です");return;}
+  if(l.type === "tournament" && (l.sides.length < 4 || l.sides.length > 8)){alert("トーナメントモードは4～8人で利用できます");return;}
   isOrderHidden = false;
   createSet({type:l.type, sides:l.sides, mode:l.mode, games:l.games, missRule:l.missRule||"out", overRule:l.overRule||"25", firstRule:l.firstRule});
 };
@@ -927,14 +951,10 @@ async function add(pts){
     const match = s.matches[activeIdx];
     if(!Array.isArray(match.game1)) match.game1 = [];
     if(!Array.isArray(match.game2)) match.game2 = [];
-    
-    if(gIdx === 0) {
-      match.game1.push(pts);
-      match.throws = match.game1;
-    } else {
-      match.game2.push(pts);
-      match.throws = match.game2;
-    }
+    if(!Array.isArray(match.game3)) match.game3 = [];
+    const gameThrows = getGameThrows(match, gIdx);
+    gameThrows.push(pts);
+    match.throws = gameThrows;
   });
 }
 
@@ -946,10 +966,10 @@ $("pad").onclick=e=>{
   const m = set.matches[activeIdx];
   const customSides = m.customSides || m.sides;
   const gIdx = m.currentGameIndex || 0;
-  const throwsList = gIdx === 1 ? (Array.isArray(m.game2) ? m.game2 : []) : (Array.isArray(m.game1) ? m.game1 : []);
+  const throwsList = getGameThrows(m, gIdx);
   const currentMatchRes = replay(customSides, throwsList, m.start, set.type==="team", set.missRule, set.overRule);
   const S_over = summarize(set).over;
-  if(!currentMatchRes.winner && !S_over) add(+p);
+  if(currentMatchRes.winner === null && !S_over) add(+p);
 };
 
 $("undo").onclick=()=>{
@@ -959,15 +979,13 @@ $("undo").onclick=()=>{
     const match = s.matches[activeIdx];
     if(!match) return false;
     const gIdx = match.currentGameIndex || 0;
-    
-    if(gIdx === 1 && Array.isArray(match.game2) && match.game2.length > 0){
-      match.game2.pop();
-      match.throws = match.game2;
-    } else if(gIdx === 0 && Array.isArray(match.game1) && match.game1.length > 0){
-      match.game1.pop();
-      match.throws = match.game1;
+    const gameThrows = getGameThrows(match, gIdx);
+    if(gameThrows.length > 0){
+      gameThrows.pop();
+      match.throws = gameThrows;
     } else if(gIdx > 0){
       match.currentGameIndex = gIdx - 1;
+      match.throws = getGameThrows(match, match.currentGameIndex);
     } else if(activeIdx > 0){
       s.activeMatchIndex = activeIdx - 1;
     } else {
@@ -982,7 +1000,7 @@ $("next").onclick=()=>{
   const m = set.matches[activeIdx];
   const customSides = m.customSides || m.sides;
   const gIdx = m.currentGameIndex || 0;
-  const throwsList = gIdx === 1 ? (Array.isArray(m.game2) ? m.game2 : []) : (Array.isArray(m.game1) ? m.game1 : []);
+  const throwsList = getGameThrows(m, gIdx);
   const currentMatchRes = replay(customSides, throwsList, m.start, set.type==="team", set.missRule, set.overRule);
   
   if(currentMatchRes.winner === null) {
@@ -1041,33 +1059,63 @@ async function proceedToNextStep(customSides) {
     const match = s.matches[s.activeMatchIndex];
     const mode = match.tournamentMode || "game1";
     const gIdx = match.currentGameIndex || 0;
-    const g1 = Array.isArray(match.game1) ? match.game1 : [];
-    const g2 = Array.isArray(match.game2) ? match.game2 : [];
+    const g1 = getGameThrows(match, 0), g2 = getGameThrows(match, 1), g3 = getGameThrows(match, 2);
+    if(!Array.isArray(match.game3)) match.game3 = [];
     
     if (mode === "match2_total" && gIdx === 0) {
       match.currentGameIndex = 1;
       match.game2 = [];
       match.throws = match.game2;
       return;
-    } else if (mode === "game2_wins") {
+    } else if (mode === "match2_total" && gIdx === 1) {
       const r1 = replay(match.customSides || match.sides, g1, match.start, false, s.missRule, s.overRule);
       const r2 = replay(match.customSides || match.sides, g2, match.start, false, s.missRule, s.overRule);
+      const scores = r1.st.map((side, i) => side.score + r2.st[i].score);
+      if(Math.max(...scores) === Math.min(...scores)) {
+        match.currentGameIndex = 2;
+        match.game3 = [];
+        match.throws = match.game3;
+        return;
+      }
+    } else if (mode === "game2_wins") {
       const wins = (match.customSides || match.sides).map(() => 0);
-      if(r1.winner !== null) wins[r1.winner]++;
-      if(r2.winner !== null) wins[r2.winner]++;
-      
-      if(Math.max(...wins) < 2) {
+      [g1, g2, g3].forEach(game => {
+        const result = replay(match.customSides || match.sides, game, match.start, false, s.missRule, s.overRule);
+        if(result.winner !== null) wins[result.winner]++;
+      });
+      if(Math.max(...wins) < 2 && gIdx < 2) {
         match.currentGameIndex = gIdx + 1;
-        if(match.currentGameIndex === 1) {
-          match.game2 = [];
-          match.throws = match.game2;
-        }
+        match.throws = getGameThrows(match, match.currentGameIndex);
         return;
       }
     }
     
-    // 7人の場合の自動勝ち上がり・敗者戦（3つ巴）連動ロジック
-    if(s.type === "tournament" && s.sides.length === 7){
+    if(s.type === "tournament" && s.sides.length === 8) {
+      const byBracket = key => s.matches.find(item => item.bracket === key);
+      const firstRound = ["m1", "m2", "m3", "m4"].map(byBracket);
+      const loser1 = byBracket("loser_round1"), loser2 = byBracket("loser_round2");
+      const semi1 = byBracket("semi1"), semi2 = byBracket("semi2");
+      const loserFinal = byBracket("loser_final"), bronze = byBracket("bronze"), finalMatch = byBracket("final");
+      if(firstRound.every(item => item && getMatchWinner(item, s.missRule, s.overRule) !== null)) {
+        const winners = firstRound.map(item => (item.customSides || item.sides)[getMatchWinner(item, s.missRule, s.overRule)]);
+        const losers = firstRound.map(item => (item.customSides || item.sides)[1 - getMatchWinner(item, s.missRule, s.overRule)]);
+        loser1.sides = [losers[0], losers[1]]; loser1.customSides = loser1.sides;
+        loser2.sides = [losers[2], losers[3]]; loser2.customSides = loser2.sides;
+        semi1.sides = [winners[0], winners[1]]; semi1.customSides = semi1.sides;
+        semi2.sides = [winners[2], winners[3]]; semi2.customSides = semi2.sides;
+      }
+      if(semi1 && semi2 && getMatchWinner(semi1, s.missRule, s.overRule) !== null && getMatchWinner(semi2, s.missRule, s.overRule) !== null) {
+        const s1 = semi1.customSides || semi1.sides, s2 = semi2.customSides || semi2.sides;
+        const w1 = getMatchWinner(semi1, s.missRule, s.overRule), w2 = getMatchWinner(semi2, s.missRule, s.overRule);
+        finalMatch.sides = [s1[w1], s2[w2]]; finalMatch.customSides = finalMatch.sides;
+        bronze.sides = [s1[1-w1], s2[1-w2]]; bronze.customSides = bronze.sides;
+      }
+      if(loser1 && loser2 && getMatchWinner(loser1, s.missRule, s.overRule) !== null && getMatchWinner(loser2, s.missRule, s.overRule) !== null) {
+        const a = loser1.customSides || loser1.sides, b = loser2.customSides || loser2.sides;
+        loserFinal.sides = [a[getMatchWinner(loser1, s.missRule, s.overRule)], b[getMatchWinner(loser2, s.missRule, s.overRule)]];
+        loserFinal.customSides = loserFinal.sides;
+      }
+    } else if(s.type === "tournament" && s.sides.length === 7){
       const m1 = s.matches.find(m => m.bracket === "m1");
       const m2 = s.matches.find(m => m.bracket === "m2");
       const m3 = s.matches.find(m => m.bracket === "m3");
@@ -1242,12 +1290,13 @@ async function proceedToNextStep(customSides) {
       const nextM = s.matches[s.activeMatchIndex];
       nextM.game1 = [];
       nextM.game2 = [];
+      nextM.game3 = [];
       nextM.currentGameIndex = 0;
       nextM.throws = nextM.game1;
       if(customSides) nextM.customSides = customSides;
     } else {
       const nextStartPlayer = 0;
-      const newMatch = {start: nextStartPlayer, throws: [], game1: [], game2: [], currentGameIndex: 0, tournamentMode: mode};
+      const newMatch = {start: nextStartPlayer, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: mode};
       if(customSides) newMatch.customSides = customSides;
       s.matches.push(newMatch);
       s.activeMatchIndex++;
@@ -1355,10 +1404,11 @@ function renderSet(set){
   const m = set.matches[activeIdx] || set.matches[0];
   if(!Array.isArray(m.game1)) m.game1 = [];
   if(!Array.isArray(m.game2)) m.game2 = [];
+  if(!Array.isArray(m.game3)) m.game3 = [];
   const customSides = m.customSides || m.sides;
   
   const gIdx = m.currentGameIndex || 0;
-  const throwsList = gIdx === 1 ? m.game2 : m.game1;
+  const throwsList = getGameThrows(m, gIdx);
   const currentMatchRes = replay(customSides, throwsList, m.start, set.type==="team", set.missRule, set.overRule);
   const curDone = currentMatchRes.winner !== null;
   
@@ -1369,6 +1419,10 @@ function renderSet(set){
   
   $("setname").textContent=set.name;
   let stageName = `【第${activeIdx+1}試合】`;
+  if(set.sides.length === 8) {
+    const names = {m1:"1回戦",m2:"1回戦",m3:"1回戦",m4:"1回戦",loser_round1:"敗者戦",loser_round2:"敗者戦",semi1:"準決勝",semi2:"準決勝",loser_final:"5位決定戦",bronze:"3位決定戦",final:"決勝戦"};
+    stageName = `【${names[m.bracket] || `第${activeIdx+1}試合`}】`;
+  }
   if (set.sides.length === 6) {
     if (m.bracket === "m1" || m.bracket === "m2") stageName = "【1回戦】";
     else if (m.bracket === "loser_round1") stageName = "【1回戦敗退者同士の試合】";
@@ -1392,7 +1446,7 @@ function renderSet(set){
     else stageName = "【1回戦】";
   }
 
-  const modeLabel = m.tournamentMode === "match2_total" ? ` (2試合合計戦 ゲーム${gIdx+1}/2)` : m.tournamentMode === "game2_wins" ? ` (2本先取)` : ` (1本勝負)`;
+  const modeLabel = m.tournamentMode === "match2_total" ? ` (2試合合計戦 ${gIdx < 2 ? `ゲーム${gIdx+1}/2` : "同点決着ゲーム"})` : m.tournamentMode === "game2_wins" ? ` (最大3ゲーム・2本先取)` : ` (1本勝負)`;
   $("setinfo").textContent=set.type==="tournament" ? `トーナメント戦 ${stageName}${modeLabel}` : set.type==="league" ? `総当たりリーグ戦 【第${activeIdx+1}試合】` : `第${activeIdx+1}試合 / 全${set.matches.length}試合`;
   $("final").innerHTML=S.over ? `<div class="banner">🏆 セットの全日程が終了しました！</div>`:"";
   
@@ -1404,6 +1458,10 @@ function renderSet(set){
       const mSides = mt.customSides || mt.sides;
       const winnerName = isDone ? mSides[mw].name : "（前の試合の終了待ち）";
       let bLabel = `【試合${idx+1}】`;
+      if(set.sides.length === 8) {
+        const names = {m1:"1回戦",m2:"1回戦",m3:"1回戦",m4:"1回戦",loser_round1:"敗者戦",loser_round2:"敗者戦",semi1:"準決勝",semi2:"準決勝",loser_final:"5位決定戦",bronze:"3位決定戦",final:"決勝戦"};
+        bLabel = `【${names[mt.bracket] || `試合${idx+1}`}】`;
+      }
       if (set.sides.length === 6) {
         if (mt.bracket === "m1" || mt.bracket === "m2") bLabel = "【1回戦】";
         else if (mt.bracket === "loser_round1") bLabel = "【初戦敗退者戦】";
@@ -1489,7 +1547,7 @@ function renderStats(){
   $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>試合</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>平均点</th><th>0点</th></tr>"+
     T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td></tr>`).join("")+"</table>"+
     "<p class='pl'>「試合」「勝」は決着したゲームごと。平均点は1投あたりの得点です。</p>";
-  $("setlist").classList.add("hide");
+
 }
 </script>
 </body>
