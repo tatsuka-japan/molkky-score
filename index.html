@@ -50,7 +50,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.13 修正版</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.14 修正版</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -311,12 +311,20 @@ $("add-home-member").onclick = () => {
   }
 };
 
+function syncTournamentModeFromGeneralSettings() {
+  if($("ntype").value === "tournament" && $("nmode").value === "total" && parseInt($("ngames").value, 10) === 2) {
+    $("ntournament-mode").value = "match2_total";
+  }
+}
+
 $("ntype").onchange=()=>{
   const type=$("ntype").value;
   $("n-team").classList.toggle("hide", type !== "team");
   $("n-solo").classList.toggle("hide", type === "team");
   $("tournament-setting-box").classList.toggle("hide", type !== "tournament");
+  syncTournamentModeFromGeneralSettings();
 };
+$("ngames").addEventListener("change", syncTournamentModeFromGeneralSettings);
 
 function getGameThrows(match, gameIndex) {
   const key = `game${gameIndex + 1}`;
@@ -763,7 +771,10 @@ async function mutate(fn){
 
 const findSet=(d,id)=>d.sets.find(x=>x.id===id);
 
-$("nmode").onchange=()=>{$("nglabel").textContent=$("nmode").value==="first"?"何勝先取？":"試合数";};
+$("nmode").onchange=()=>{
+  $("nglabel").textContent=$("nmode").value==="first"?"何勝先取？":"試合数";
+  syncTournamentModeFromGeneralSettings();
+};
 
 function newSetId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 
@@ -791,7 +802,11 @@ async function createSet(set){
       }
       const shuffled = shuffleArray(set.sides);
       const n = shuffled.length;
-      const tournamentMode = $("ntournament-mode").value;
+      let tournamentMode = $("ntournament-mode").value;
+      if(set.mode === "total" && set.games === 2) {
+        tournamentMode = "match2_total";
+        $("ntournament-mode").value = tournamentMode;
+      }
       
       if (n === 8) {
         const addBracketMatch = (sides, bracket) => matches.push({ sides, start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode, bracket });
