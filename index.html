@@ -111,6 +111,13 @@ td.l,th.l{text-align:left}
         <option value="skip">1回休み（3回連続0点でそのターン/チームを1回休み）</option>
       </select></label>
 
+      <!-- 50点超過時のルール選択 -->
+      <label>50点超過時のルール <select id="noverrule">
+        <option value="25">公式ルール（50点超えで25点に戻る）</option>
+        <option value="0">得点リセット（50点超えで0点に戻る）</option>
+        <option value="minus">超過分マイナス（50点を超えた分だけ引く）</option>
+      </select></label>
+
       <label><span id="nglabel">試合数</span><input id="ngames" type="number" min="1" max="99" value="3"></label>
       <label>第1試合の先攻（並び順） <select id="nfirstgame">
         <option value="order">登録・チェック順のまま</option>
@@ -181,15 +188,16 @@ let matchTimerInterval = null;
 let timerSeconds = 0;
 let isTimerRunning = false;
 
-function replay(sides,throws,start,isTeam,missRule){
+function replay(sides,throws,start,isTeam,missRule,overRule){
   const n=sides.length;
   const rule = missRule || "out";
+  const over = overRule || "25";
   const st=sides.map(s=>({
     score:0, 
     ptr:0, 
     teamMiss:0, 
     teamOut:false, 
-    teamSkipped:false, // チーム全体の1回休みフラグ
+    teamSkipped:false, 
     throwsHistory: [],
     players:s.players.map(()=>({miss:0,out:false,pts:0,n:0,zero:0, history:[], skipped:false}))
   }));
@@ -215,14 +223,10 @@ function replay(sides,throws,start,isTeam,missRule){
   for(const pts of throws){
     if(winner!==null)break;
     
-    // チーム戦かつチーム自体が1回休み状態の場合、このターンの投球をスキップして次のチームへ
     const s=st[turn];
     if(isTeam && s.teamSkipped){
       s.teamSkipped = false;
-      // 次の生存チームへターンを回す
       for(let k=1;k<=n;k++){const j=(turn+k)%n;if(!sideOut(j)){turn=j;break;}}
-      // 今回の得点（pts）は進めずにやり直すため、ループのこの回はスキップ（あるいはptsを消費しない処理）
-      // ※配列要素ループのため、ここでループインデックスを戻すかわりに、ptsの適用をバイパスする処理
     }
 
     const pi=pick(turn),p=s.players[pi];
@@ -237,13 +241,13 @@ function replay(sides,throws,start,isTeam,missRule){
           s.teamMiss++;
           if(s.teamMiss >= 3){
             s.teamMiss = 0;
-            s.teamSkipped = true; // チーム全体のターンを1回休み
+            s.teamSkipped = true;
           }
         }else{
           p.miss++;
           if(p.miss >= 3){
             p.miss = 0;
-            p.skipped = true; // 個人として1回休み
+            p.skipped = true;
           }
         }
       } else {
@@ -257,7 +261,23 @@ function replay(sides,throws,start,isTeam,missRule){
       }
     }else{
       if(isTeam){s.teamMiss=0;}else{p.miss=0;}
-      const t=s.score+pts;s.score=t>50?25:t;if(t===50)winner=turn;
+      const t=s.score+pts;
+      if(t === 50){
+        s.score = 50;
+        winner = turn;
+      } else if(t > 50){
+        if(over === "0"){
+          s.score = 0;
+        } else if(over === "minus"){
+          // 超過分マイナス（50から超過分を引く、または元スコアから超過分を引くなど。ここでは一般的ルールとして 50 - (t - 50) = 100 - t とする）
+          s.score = 100 - t;
+        } else {
+          // デフォルト：25点に戻る
+          s.score = 25;
+        }
+      } else {
+        s.score = t;
+      }
     }
     s.ptr=(pi+1)%s.players.length;
     if(winner!==null)break;
@@ -269,9 +289,9 @@ function replay(sides,throws,start,isTeam,missRule){
 }
 
 function summarize(set){
-  const {sides,matches,mode,games,type,missRule}=set,n=sides.length;
+  const {sides,matches,mode,games,type,missRule,overRule}=set,n=sides.length;
   const isTeam=(type==="team");
-  const res=matches.map(m=>replay(m.customSides || sides,m.throws,m.start,isTeam,missRule));
+  const res=matches.map(m=>replay(m.customSides || sides,m.throws,m.start,isTeam,missRule,overRule));
   const wins=Array(n).fill(0),total=Array(n).fill(0);
   let played=0;
   res.forEach(r=>{r.st.forEach((s,i)=>total[i]+=s.score);if(r.winner!==null){wins[r.winner]++;played++;}});
@@ -293,7 +313,7 @@ function nextStart(set){
   const activeSides = set.matches[k-1].customSides || set.sides;
   if(set.firstRule==="rotate")return k%n;
   if(set.firstRule==="loser"){
-    const r=replay(activeSides,set.matches[k-1].throws,set.matches[k-1].start,isTeam,set.missRule);
+    const r=replay(activeSides,set.matches[k-1].throws,set.matches[k-1].start,isTeam,set.missRule,set.overRule);
     let lo=0;r.st.forEach((s,i)=>{if(s.score<r.st[lo].score)lo=i;});
     return lo;
   }
@@ -668,15 +688,16 @@ $("mkset").onclick=()=>{
   if(sides.length<2){alert("2つ以上のサイド（メンバー）を選んでください");return;}
   const games=Math.max(1,Math.min(99,parseInt($("ngames").value)||1));
   const missRule=$("nmissrule").value;
+  const overRule=$("noverrule").value;
   isOrderingNextMatch = false;
-  createSet({type,sides,mode:$("nmode").value,games,missRule,firstRule:$("nfirst").value});
+  createSet({type,sides,mode:$("nmode").value,games,missRule,overRule,firstRule:$("nfirst").value});
 };
 
 $("copyset").onclick=()=>{
   const l=data.sets[data.sets.length-1];
   if(!l){alert("コピーできる前のセットがありません");return;}
   isOrderingNextMatch = false;
-  createSet({type:l.type,sides:l.sides,mode:l.mode,games:l.games,missRule:l.missRule||"out",firstRule:l.firstRule});
+  createSet({type:l.type,sides:l.sides,mode:l.mode,games:l.games,missRule:l.missRule||"out",overRule:l.overRule||"25",firstRule:l.firstRule});
 };
 
 $("addbtn").onclick=async()=>{
@@ -918,7 +939,7 @@ function renderSet(set){
 
   const m=set.matches[k-1],historyLogs=[];
   for(let t=1;t<=m.throws.length;t++){
-    const rr=replay(activeSides,m.throws.slice(0,t),m.start,isTeam,set.missRule);
+    const rr=replay(activeSides,m.throws.slice(0,t),m.start,isTeam,set.missRule,set.overRule);
     historyLogs.push(t+"投目 → "+m.throws[t-1]+"点（"+rr.st.map((x,i)=>esc(activeSides[i].name)+" "+x.score).join(" / ")+"）");
   }
   $("log").innerHTML=historyLogs.reverse().join("<br>");
