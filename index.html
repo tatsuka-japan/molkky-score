@@ -50,7 +50,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.12 修正版</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.13 修正版</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -358,6 +358,19 @@ function getMatchWinner(m, missRule, overRule) {
     }
     return null;
   }
+}
+
+function getMatchScoreHTML(match, set) {
+  const sides = match.customSides || match.sides;
+  const parts = [];
+  for(let gameIndex = 0; gameIndex < 3; gameIndex++) {
+    const throws = getGameThrows(match, gameIndex);
+    if(throws.length === 0) continue;
+    const result = replay(sides, throws, match.start, set.type === "team", set.missRule, set.overRule);
+    const scores = sides.map((side, i) => `${esc(side.name)} ${result.st[i].score}点`).join(" / ");
+    parts.push(`${match.tournamentMode && match.tournamentMode !== "game1" ? `第${gameIndex+1}ゲーム: ` : ""}${scores}`);
+  }
+  return parts.length ? parts.join("<br>") : "-";
 }
 
 function isMyTurn(){
@@ -1496,6 +1509,29 @@ function renderSet(set){
     $("tournament-overview").classList.add("hide");
   }
 
+  const scoreKey = side => set.type === "team" ? `team:${side.name}` : `player:${side.players[0] || side.name}`;
+  const previousScores = new Map(), totalScores = new Map();
+  for(let matchIndex = 0; matchIndex <= activeIdx; matchIndex++) {
+    const historyMatch = set.matches[matchIndex];
+    if(!historyMatch) continue;
+    const historySides = historyMatch.customSides || historyMatch.sides;
+    const matchTotals = new Map();
+    const lastGame = matchIndex === activeIdx ? gIdx : 2;
+    for(let gameIndex = 0; gameIndex <= lastGame; gameIndex++) {
+      const gameThrows = getGameThrows(historyMatch, gameIndex);
+      if(gameThrows.length === 0) continue;
+      const gameResult = replay(historySides, gameThrows, historyMatch.start, set.type === "team", set.missRule, set.overRule);
+      gameResult.st.forEach((sideResult, sideIndex) => {
+        const key = scoreKey(historySides[sideIndex]);
+        matchTotals.set(key, (matchTotals.get(key) || 0) + sideResult.score);
+        totalScores.set(key, (totalScores.get(key) || 0) + sideResult.score);
+      });
+    }
+    if(matchIndex < activeIdx && getMatchWinner(historyMatch, set.missRule, set.overRule) !== null) {
+      matchTotals.forEach((score, key) => previousScores.set(key, score));
+    }
+  }
+
   $("board").innerHTML=customSides.map((s,i)=>{
     const cls=currentMatchRes.winner===i?"side win":(!curDone&&!S.over&&currentMatchRes.turn===i?"side now":"side");
     const stSide=currentMatchRes.st[i];
@@ -1504,7 +1540,10 @@ function renderSet(set){
       const historyStr = q.history.length > 0 ? ` [${q.history.join(",")}]` : "";
       return `<span class="${set.type!=="team"&&q.out?"out":""}">${esc(p)}${historyStr}</span>`;
     }).join(" ");
-    return `<div class="card ${cls}"><div><b>${esc(s.name)}</b><div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>このゲームのスコア</small></div></div>`;
+    const key = scoreKey(s);
+    const previous = previousScores.has(key) ? `${previousScores.get(key)}点` : "-";
+    const total = totalScores.get(key) || 0;
+    return `<div class="card ${cls}"><div><b>${esc(s.name)}</b><div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>このゲーム</small><small>前の試合 ${previous}</small><small>合計 ${total}点</small></div></div>`;
   }).join("");
 
   // 個人戦・トーナメント・リーグでもオーダー/先攻後攻の並び替えパネルを表示する
@@ -1524,13 +1563,14 @@ function renderSet(set){
   $("next").classList.toggle("hide", !curDone || S.over);
   $("next").textContent = matchOver ? "次の対戦（次の試合）へ進む" : "次のゲームへ進む";
 
-  let resultsHtml = "<table><tr><th>試合</th><th>先攻</th><th>対戦カード</th><th>勝者</th></tr>";
+  let resultsHtml = "<table><tr><th>試合</th><th>先攻</th><th>対戦カード</th><th>対戦スコア</th><th>勝者</th></tr>";
   resultsHtml += set.matches.map((mt,mi)=>{
     const mSides = mt.customSides || mt.sides;
     const mw = getMatchWinner(mt, set.missRule, set.overRule);
     const winnerText = mw !== null ? esc(mSides[mw].name) : "進行中";
     const vsString = mSides.map(s => s.name).join(" vs ");
-    return `<tr><td>${mi+1}</td><td>${esc(mSides[mt.start].name)}</td><td>${esc(vsString)}</td><td>${winnerText}</td></tr>`;
+    const scoreText = getMatchScoreHTML(mt, set);
+    return `<tr><td>${mi+1}</td><td>${esc(mSides[mt.start].name)}</td><td>${esc(vsString)}</td><td>${scoreText}</td><td>${winnerText}</td></tr>`;
   }).join("") + "</table>";
   $("results").innerHTML = resultsHtml;
 
