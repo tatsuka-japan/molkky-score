@@ -22,7 +22,7 @@ button.tab{background:#ddd;color:#222;font-size:14px;padding:8px 10px;margin:2px
 button.tab.on{background:#3b6ea8;color:#fff}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .grid button{font-size:22px;padding:14px}
-textarea,input[type=text],input[type=number],select{font-size:16px;width:100%;box-sizing:border-box;padding:8px;margin:4px 0}
+textarea,input[type=text],input[type=number],input[type=password],select{font-size:16px;width:100%;box-sizing:border-box;padding:8px;margin:4px 0}
 label{display:block;margin-top:6px}
 .chk label{display:inline-block;margin:4px 10px 4px 0;font-size:16px}
 .hide{display:none}
@@ -39,6 +39,20 @@ td.l,th.l{text-align:left}
 </style>
 </head>
 <body>
+
+<div id="lock">
+  <div class="card" style="max-width: 400px; margin: 40px auto; text-align: center;">
+    <h2>🔒 アプリロック</h2>
+    <p class="pl">パスワードを入力してください</p>
+    <form onsubmit="return unlock()">
+      <input id="password" type="password" inputmode="numeric" placeholder="パスワード">
+      <p><button type="submit" style="width:100%;">開く</button></p>
+      <p id="error" style="color:#c33; font-weight:bold;"></p>
+    </form>
+  </div>
+</div>
+
+<div id="content" hidden>
 <h1>🎯 モルック スコア <span class="ver-badge">v1.0</span></h1>
 
 <div id="home">
@@ -53,11 +67,16 @@ td.l,th.l{text-align:left}
       <button type="button" class="sub" id="add-home-member" style="font-size:14px; padding:6px 12px;">追加</button>
     </div>
 
+    <label style="margin-top:12px;">部屋のパスワード（4桁など・空欄でもOK）
+      <input id="new-room-pass" type="password" inputmode="numeric" maxlength="4" placeholder="例: 1234" style="margin-top:4px;">
+    </label>
+
     <p style="margin-top:12px;"><button id="create">チェックしたメンバーで部屋を作る</button></p>
   </div>
   <div class="card">
     <b>部屋に参加する</b>
-    <input id="code" type="text" inputmode="numeric" maxlength="4" placeholder="4桁のコード">
+    <input id="code" type="text" inputmode="numeric" maxlength="4" placeholder="4桁の部屋コード">
+    <input id="join-pass" type="password" inputmode="numeric" maxlength="4" placeholder="パスワード（設定されている場合）">
     <p><button id="join">参加する</button></p>
   </div>
 </div>
@@ -176,10 +195,26 @@ td.l,th.l{text-align:left}
     <div class="card"><b>セット一覧</b><div id="setlist"></div></div>
   </div>
 </div>
+</div>
+
+<script>
+  function unlock() {
+    // ここでアプリケーション全体の解除パスワードを設定できます（例："1234" や任意の文字列）
+    const APP_PASSWORD = "8men"; 
+    
+    if (document.getElementById("password").value === APP_PASSWORD) {
+      document.getElementById("lock").hidden = true;
+      document.getElementById("content").hidden = false;
+    } else {
+      document.getElementById("error").textContent = "パスワードが違います";
+    }
+    return false;
+  }
+</script>
 
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getFirestore,doc,setDoc,onSnapshot,runTransaction} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getFirestore,doc,setDoc,getDoc,onSnapshot,runTransaction} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig={apiKey:"AIzaSyAautN2cGfEco5KvR0iPzgftSgpiqr3pUw", authDomain:"molkky-998f1.firebaseapp.com", projectId:"molkky-998f1", storageBucket:"molkky-998f1.firebasestorage.app", messagingSenderId:"815701794917", appId:"1:815701794917:web:8c4271e83d153f2bb1268c"};
 const db=getFirestore(initializeApp(firebaseConfig));
@@ -611,11 +646,31 @@ $("create").onclick=async()=>{
   
   if(players.length < 2){alert("参加者を2人以上選択してください");return;}
   const code=String(Math.floor(1000+Math.random()*9000));
-  await setDoc(doc(db,"rooms",code),{players,sets:[],created:Date.now()});
+  const pass = $("new-room-pass").value.trim();
+  
+  await setDoc(doc(db,"rooms",code),{players,sets:[],pass:pass,created:Date.now()});
   enter(code);
 };
 
-$("join").onclick=()=>{const c=$("code").value.trim();if(c)enter(c);};
+$("join").onclick=async()=>{
+  const c=$("code").value.trim();
+  const inputPass=$("join-pass").value.trim();
+  if(!c)return;
+
+  const roomRef = doc(db,"rooms",c);
+  const roomSnap = await getDoc(roomRef);
+  if(!roomSnap.exists()){
+    alert("指定された部屋コードが見つかりません");
+    return;
+  }
+  const roomData = roomSnap.data();
+  if(roomData.pass && roomData.pass !== inputPass){
+    alert("パスワードが違います");
+    return;
+  }
+  enter(c);
+};
+
 $("leave").onclick=()=>{if(unsub)unsub();location.hash="";location.reload();};
 if(location.hash.length>1)enter(location.hash.slice(1));
 
@@ -928,7 +983,7 @@ function renderSet(set){
 
   $("next").classList.toggle("hide",!(S.curDone&&!S.over));
 
-  $("results").innerHTML="<table><tr><th>試合</th><th>先攻</th>"+set.sides.map(s=>`<th>${esc(s.name)}</th>`).join("")+"<th>勝者</th></tr>"+
+  $("results").innerHTML="<table><tr><th>試合</th><th>先攻</th>"+set.sides.jsons?.[0] ? "" : set.sides.map(s=>`<th>${esc(s.name)}</th>`).join("")+"<th>勝者</th></tr>"+
     S.res.map((r,mi)=>{
       const mSides = set.matches[mi].customSides || set.sides;
       return `<tr><td>${mi+1}</td><td>${esc(mSides[set.matches[mi].start].name)}</td>`+
