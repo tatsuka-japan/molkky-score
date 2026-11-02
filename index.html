@@ -51,7 +51,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.4</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.6</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -320,7 +320,7 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const uniq=a=>[...new Set(a)];
 let room=null,data=null,unsub=null,cur=-1,view="new",prevLen=-1,sig="",firstSnap=true;
-let isOrderCollapsed = true; // デフォルトで折りたたむ（隠す）状態にする
+let isOrderHidden = false; // 初期状態では非表示にせず、ボタンを押したときだけ非表示にする
 let defaultHomeMembers = ["加藤", "木下", "佐藤", "千田", "成澤", "林", "広田", "前澤"];
 
 function renderHomeMembers() {
@@ -568,13 +568,13 @@ function renderNextOrderForm(set) {
       }).join("") + `</div></div>`;
   }).join("");
   $("next-order-container").innerHTML = html;
-  $("next-order-container").style.display = isOrderCollapsed ? "none" : "block";
-  $("order-save-area").style.display = isOrderCollapsed ? "none" : "block";
-  $("toggle-order-edit-btn").textContent = isOrderCollapsed ? "展開する" : "折りたたむ";
+  
+  // ユーザーが非表示ボタン（または保存ボタン）を押していない限りは表示する
+  $("match-order-card").style.display = isOrderHidden ? "none" : "block";
 }
 
 $("toggle-order-edit-btn").onclick = () => {
-  isOrderCollapsed = !isOrderCollapsed;
+  isOrderHidden = !isOrderHidden;
   const set = data.sets[cur];
   if(set) renderNextOrderForm(set);
 };
@@ -639,7 +639,7 @@ function enter(code){
     const d=s.exists()?s.data():null;
     if(!d||!Array.isArray(d.sets)){alert("部屋が見つかりません");$("leave").onclick();return;}
     if(firstSnap){firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";}
-    else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderCollapsed=true;}
+    else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderHidden=false;}
     if(cur>=d.sets.length)cur=d.sets.length-1;
     if(cur<0&&view==="set")view="new";
     prevLen=d.sets.length;data=d;render();
@@ -700,14 +700,14 @@ $("mkset").onclick=()=>{
   const games=Math.max(1,Math.min(99,parseInt($("ngames").value)||1));
   const missRule=$("nmissrule").value;
   const overRule=$("noverrule").value;
-  isOrderCollapsed = true;
+  isOrderHidden = false; // 新しいセット作成時は表示状態にする
   createSet({type,sides,mode:$("nmode").value,games,missRule,overRule,firstRule:$("nfirst").value});
 };
 
 $("copyset").onclick=()=>{
   const l=data.sets[data.sets.length-1];
   if(!l){alert("コピーできる前のセットがありません");return;}
-  isOrderCollapsed = true;
+  isOrderHidden = false;
   createSet({type:l.type,sides:l.sides,mode:l.mode,games:l.games,missRule:l.missRule||"out",overRule:l.overRule||"25",firstRule:l.firstRule});
 };
 
@@ -754,7 +754,7 @@ $("next").onclick=()=>{
     alert("この試合がまだ終了していません。");
     return;
   }
-  isOrderCollapsed = true; // 次の試合へ進むときにも閉じる
+  isOrderHidden = false; // 次の試合へ進んだときは再度表示して順番を変えられるようにする
   proceedToNextMatch(null);
 };
 
@@ -777,8 +777,8 @@ $("save-order").onclick = () => {
     }
   });
   
-  // 保存後に自動で折りたたむ（隠す）状態にする
-  isOrderCollapsed = true;
+  // 確定ボタンを押したら完全に非表示にする
+  isOrderHidden = true;
   render();
 };
 
@@ -817,7 +817,7 @@ $("copystats").onclick=async()=>{
 document.getElementById("tabs").onclick=e=>{
   const v=e.target.dataset.v;if(!v)return;
   stopTimer();
-  if(v==="new"||v==="stats"){view=v;}else{view="set";cur=+v; isOrderCollapsed=true;}
+  if(v==="new"||v==="stats"){view=v;}else{view="set";cur=+v; isOrderHidden=false;}
   render();
 };
 
@@ -915,7 +915,6 @@ function renderSet(set){
   }).join("");
 
   if (isTeam && !S.over) {
-    $("match-order-card").style.display = "block";
     renderNextOrderForm(set);
   } else {
     $("match-order-card").style.display = "none";
