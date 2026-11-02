@@ -35,10 +35,11 @@ td.l,th.l{text-align:left}
 .match-timer-box{display:flex;align-items:center;gap:8px;background:#eef4fb;padding:4px 10px;border-radius:6px}
 .match-timer{font-size:16px;font-weight:bold;color:#3b6ea8}
 .disabled-member{color:#aaa;text-decoration:line-through;}
+.ver-badge{display:inline-block;background:#3b6ea8;color:#fff;font-size:11px;padding:2px 6px;border-radius:4px;vertical-align:middle;margin-left:6px;}
 </style>
 </head>
 <body>
-<h1>🎯 モルック スコア</h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.0</span></h1>
 
 <div id="home">
   <div class="card">
@@ -111,7 +112,6 @@ td.l,th.l{text-align:left}
         <option value="skip">1回休み（3回連続0点でそのターン/チームを1回休み）</option>
       </select></label>
 
-      <!-- 50点超過時のルール選択 -->
       <label>50点超過時のルール <select id="noverrule">
         <option value="25">公式ルール（50点超えで25点に戻る）</option>
         <option value="0">得点リセット（50点超えで0点に戻る）</option>
@@ -269,10 +269,8 @@ function replay(sides,throws,start,isTeam,missRule,overRule){
         if(over === "0"){
           s.score = 0;
         } else if(over === "minus"){
-          // 超過分マイナス（50から超過分を引く、または元スコアから超過分を引くなど。ここでは一般的ルールとして 50 - (t - 50) = 100 - t とする）
           s.score = 100 - t;
         } else {
-          // デフォルト：25点に戻る
           s.score = 25;
         }
       } else {
@@ -336,7 +334,7 @@ function tally(room){
     });
     if(S.over)S.winners.forEach(i=>set.sides[i].players.forEach(nm=>get(nm).setWin++));
   });
-  return Object.values(T).sort((a,b)=> b.win-a.win || (b.played?b.win/b.played:0)-(a.played?b.win/b.played:0) || b.pts-a.pts);
+  return Object.values(T).sort((a,b)=> b.win-a.win || (b.played?b.win/b.played:0)-(a.played?b.win/a.played:0) || b.pts-a.pts);
 }
 
 const $=id=>document.getElementById(id);
