@@ -34,6 +34,7 @@ td.l,th.l{text-align:left}
 .match-timer-box{display:flex;align-items:center;gap:8px;background:#eef4fb;padding:4px 10px;border-radius:6px}
 .match-timer{font-size:16px;font-weight:bold;color:#3b6ea8}
 .disabled-member{color:#aaa;text-decoration:line-through;}
+.miss-streak{display:inline-block;margin:3px 0;padding:3px 8px;border-radius:6px;background:#fff0e6;color:#b42318;font-size:15px;font-weight:700;border:1px solid #e7a18e;}
 .ver-badge{display:inline-block;background:#3b6ea8;color:#fff;font-size:11px;padding:2px 6px;border-radius:4px;vertical-align:middle;margin-left:6px;}
 </style>
 </head>
@@ -50,7 +51,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.10</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.20</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -126,6 +127,7 @@ td.l,th.l{text-align:left}
 <option value="total">③ 試合数を決める（合計得点が多いサイドの勝ち）</option>
 </select></label>
 </div>
+<p id="league-games-desc" class="pl hide">各対戦カードで設定試合数を行います。2試合以上の場合は合計得点で勝者を決めます。</p>
 <div id="tournament-setting-box" class="hide" style="background:#eef4fb; padding:8px; border-radius:8px; margin:8px 0;">
 <label>トーナメントの対戦ルール <select id="ntournament-mode">
 <option value="game1">① 1本勝負（1ゲーム先取で勝ち抜け）</option>
@@ -145,8 +147,8 @@ td.l,th.l{text-align:left}
 <label id="ngames-label"><span id="nglabel">試合数</span><input id="ngames" type="number" min="1" max="99" value="3"></label>
 <div id="nfirstgame-box">
 <label>第1試合の先攻（並び順） <select id="nfirstgame">
-<option value="order">登録・チェック順のまま</option>
-<option value="custom">カスタム（自由に並び替え）</option>
+<option value="order">登録順（ルームの参加者登録順）</option>
+<option value="custom">カスタム（参加者一覧の並び順）</option>
 <option value="shuffle">ランダム（シャッフル）</option>
 <option value="reverse">逆順（後ろから）</option>
 </select></label>
@@ -171,8 +173,18 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="final"></div>
+<div id="solo-block-card" class="card hide" style="background:#eef4fb;">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="block-config-title">ブロック設定</b><button type="button" class="sub" id="toggle-block-config" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
+<div id="block-config-content">
+<p class="pl" id="block-config-desc">参加者を1～3ブロックに分けます。試合開始前に設定してください。</p>
+<label>ブロック数 <select id="solo-block-count"><option value="1">1ブロック</option><option value="2">2ブロック</option><option value="3">3ブロック</option></select></label>
+<div id="solo-block-assignments"></div>
+<button type="button" class="sub" id="save-solo-blocks">ブロック設定を保存</button>
+<span id="solo-block-status" class="pl"></span>
+</div>
+</div>
 <div id="tournament-overview" class="card hide" style="background:#faf8f5;">
-<b>🌳 トーナメント表 / 対戦スケジュール</b>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="tournament-overview-title">🌳 トーナメント表 / 対戦スケジュール</b><button type="button" class="sub" id="toggle-tournament-overview" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
 <div id="tournament-tree-content"></div>
 </div>
 <div id="board"></div>
@@ -248,10 +260,11 @@ function replay(sides,throws,start,isTeam,missRule,overRule){
   const safeThrows = Array.isArray(throws) ? throws : [];
   for(const pts of safeThrows){
     if(winner!==null)break;
-    const s=st[turn];
+    let s=st[turn];
     if(isTeam && s.teamSkipped){
       s.teamSkipped = false;
       for(let k=1;k<=n;k++){const j=(turn+k)%n;if(!sideOut(j)){turn=j;break;}}
+      s=st[turn];
     }
     const pi=pick(turn),p=s.players[pi];
     p.n++;p.pts+=pts; p.history.push(pts); s.throwsHistory.push(pts);
@@ -288,6 +301,9 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const uniq=a=>[...new Set(a)];
 let room=null,data=null,unsub=null,cur=-1,view="new",prevLen=-1,sig="",firstSnap=true;
 let isOrderHidden = false; 
+let isScheduleHidden = false;
+let isBlockConfigHidden = false;
+let tournamentModeManuallySet = false;
 let homeMembersList = ["加藤", "木下", "佐藤", "千田", "成澤", "林", "広田", "前澤"];
 
 function renderHomeMembers() {
@@ -312,20 +328,30 @@ $("add-home-member").onclick = () => {
 };
 
 function syncTournamentModeFromGeneralSettings() {
-  if(["tournament", "league"].includes($("ntype").value) && $("nmode").value === "total") {
+  if($("ntype").value === "tournament") {
     const games = Math.max(1, parseInt($("ngames").value, 10) || 1);
-    $("ntournament-mode").value = games > 1 ? "match_total" : "game1";
+    if($("nmode").value === "total") {
+      $("ntournament-mode").value = games > 1 ? "match_total" : "game1";
+      tournamentModeManuallySet = false;
+    } else if(!tournamentModeManuallySet) {
+      $("ntournament-mode").value = games > 1 ? "match_total" : "game1";
+    }
   }
 }
 
 $("ntype").onchange=()=>{
   const type=$("ntype").value;
+  tournamentModeManuallySet = false;
   $("n-team").classList.toggle("hide", type !== "team");
   $("n-solo").classList.toggle("hide", type === "team");
   $("tournament-setting-box").classList.toggle("hide", type !== "tournament");
+  $("n-mode-box").classList.toggle("hide", type === "tournament" || type === "league");
+  $("league-games-desc").classList.toggle("hide", type !== "league");
+  $("nglabel").textContent = (type === "team" || type === "solo") && $("nmode").value === "first" ? "何勝先取？" : "試合数";
   syncTournamentModeFromGeneralSettings();
 };
 $("ngames").addEventListener("change", syncTournamentModeFromGeneralSettings);
+$("ntournament-mode").onchange=()=>{ tournamentModeManuallySet = true; };
 
 function getGameThrows(match, gameIndex) {
   const key = `game${gameIndex + 1}`;
@@ -338,7 +364,7 @@ function getMatchWinner(m, missRule, overRule, isTeam=false) {
   const g1 = getGameThrows(m, 0), g2 = getGameThrows(m, 1), g3 = getGameThrows(m, 2);
 
   if (mode === "match_total" || mode === "match2_total") {
-    const gamesToPlay = mode === "match2_total" ? 2 : Math.max(2, parseInt(m.gamesToPlay, 10) || 2);
+    const gamesToPlay = mode === "match2_total" ? 2 : Math.max(1, parseInt(m.gamesToPlay, 10) || 2);
     const totals = customSides.map(() => 0);
     for(let gameIndex = 0; gameIndex < gamesToPlay; gameIndex++) {
       const game = getGameThrows(m, gameIndex);
@@ -403,6 +429,7 @@ function isMyTurn(){
 
 const teamNamesDefault = ["赤チーム", "白チーム", "青チーム", "黄チーム", "緑チーム", "紫チーム", "橙チーム", "桃チーム"];
 let teamAssignments = {};
+let teamOrder = {};
 
 function scoreSideKey(side, type) {
   return type === "team" ? `team:${side.name}` : `player:${side.players[0] || side.name}`;
@@ -426,6 +453,57 @@ function getSetTotalScores(set) {
   return totals;
 }
 
+function getLeagueStandings(set){
+  const blocks=Array.isArray(set.blocks)&&set.blocks.length?set.blocks:[{name:null,players:set.sides.map(side=>side.name)}];
+  return blocks.map(block=>{
+    const names=block.players||[];
+    const rows=new Map(names.map((name,index)=>[name,{name,wins:0,pointsFor:0,pointsAgainst:0,headToHeadWins:0,seed:index}]));
+    const directResults=[];
+    set.matches.filter(match=>!match.leaguePlayoff&&(block.name?match.blockName===block.name:!match.blockName)).forEach(match=>{
+      const sides=match.customSides||match.sides;
+      const winner=getMatchWinner(match,set.missRule,set.overRule,false);
+      if(winner!==null&&sides[winner]&&rows.has(sides[winner].name)){
+        rows.get(sides[winner].name).wins++;
+        const loser=sides[1-winner]; if(loser&&rows.has(loser.name)) directResults.push([sides[winner].name,loser.name]);
+      }
+      const limit=Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1);
+      for(let gameIndex=0;gameIndex<limit;gameIndex++){
+        const throws=getGameThrows(match,gameIndex); if(!throws.length)continue;
+        const result=replay(sides,throws,match.start,false,set.missRule,set.overRule);
+        sides.forEach((side,i)=>{
+          const row=rows.get(side.name); if(!row)return;
+          row.pointsFor+=result.st[i].score;
+          sides.forEach((opponent,j)=>{if(i!==j)row.pointsAgainst+=result.st[j].score;});
+        });
+      }
+    });
+    const groups=new Map();
+    [...rows.values()].forEach(row=>{const list=groups.get(row.wins)||[];list.push(row.name);groups.set(row.wins,list);});
+    groups.forEach(tiedNames=>{
+      const tied=new Set(tiedNames);
+      directResults.forEach(([winner,loser])=>{if(tied.has(winner)&&tied.has(loser))rows.get(winner).headToHeadWins++;});
+    });
+    const sorted=[...rows.values()].map(row=>({...row,differential:row.pointsFor-row.pointsAgainst})).sort((a,b)=>b.wins-a.wins||b.headToHeadWins-a.headToHeadWins||b.differential-a.differential||b.pointsFor-a.pointsFor||a.seed-b.seed);
+    let rank=0;
+    sorted.forEach((row,index)=>{
+      const previous=sorted[index-1];
+      if(!previous||row.wins!==previous.wins||row.headToHeadWins!==previous.headToHeadWins||row.differential!==previous.differential||row.pointsFor!==previous.pointsFor)rank=index+1;
+      row.rank=rank;
+    });
+    const playoff=set.matches.find(match=>match.leaguePlayoff&&(match.blockName||null)===(block.name||null));
+    if(playoff) {
+      const winner=getMatchWinner(playoff,set.missRule,set.overRule,false);
+      if(winner!==null) {
+        const sides=playoff.customSides||playoff.sides, winnerName=sides[winner].name;
+        const formerLeaders=sorted.filter(row=>row.rank===1);
+        formerLeaders.forEach(row=>{row.rank=row.name===winnerName?1:2;});
+      }
+    }
+    return {name:block.name||"全体",standings:sorted};
+  });
+}
+
+
 function summarize(set){
   const {matches,type,missRule,overRule}=set;
   if(type === "team" || type === "solo") {
@@ -447,10 +525,60 @@ function summarize(set){
       }
       return {over:false, winnerNames:[]};
     }
-    const allDone = matches.length > 0 && matches.every(match => getMatchWinner(match, missRule, overRule, type === "team") !== null);
-    return {over:allDone && matches.length >= (set.games || 1), winnerNames:[]};
+    const blocks = Array.isArray(set.blocks) && set.blocks.length ? set.blocks : [{name:null,players:set.sides.map(side=>side.name)}];
+    const winningNames = [];
+    let allBlocksDone = true;
+    for(const block of blocks) {
+      const blockMatches = matches.filter(match => !match.totalTiebreak && (block.name ? match.blockName === block.name : !match.blockName));
+      const wins = new Map((block.players || []).map(name=>[name,0]));
+      let blockDone = blockMatches.length > 0;
+      for(const match of blockMatches) {
+        if(match.skipped) continue;
+        const winner = getMatchWinner(match, missRule, overRule, type === "team");
+        if(winner === null) { blockDone = false; continue; }
+        const sides = match.customSides || match.sides;
+        const name = sides[winner] && sides[winner].name;
+        if(wins.has(name)) wins.set(name, wins.get(name)+1);
+      }
+      const target = Math.max(1, parseInt(set.games,10)||1);
+      if(set.mode === "first") {
+        const reached = [...wins].filter(([,count])=>count>=target).map(([name])=>name);
+        if(reached.length) winningNames.push(reached[0]);
+        else if(blockDone) {
+          const maxWins=Math.max(...wins.values());
+          winningNames.push(...[...wins].filter(([,count])=>count===maxWins).map(([name])=>name));
+        } else allBlocksDone=false;
+      } else {
+        if(blockMatches.some(match=>!match.skipped && getMatchWinner(match,missRule,overRule,type==="team")===null)) blockDone=false;
+        if(blockDone) {
+          const maxWins=Math.max(...wins.values());
+          winningNames.push(...[...wins].filter(([,count])=>count===maxWins).map(([name])=>name));
+        } else allBlocksDone=false;
+      }
+    }
+    return {over:allBlocksDone && winningNames.length>0, winnerNames:allBlocksDone?uniq(winningNames):[]};
   }
-  const allCompleted = matches.length > 0 && matches.every(match => getMatchWinner(match, missRule, overRule) !== null);
+  const allCompleted = matches.length > 0 && matches.every(match => match.skipped || getMatchWinner(match, missRule, overRule) !== null);
+  if(!allCompleted) return {over:false,winnerNames:[]};
+  if(type === "tournament") {
+    const finalMatch=matches.find(match=>match.bracket==="final") || matches[matches.length-1];
+    const winner=finalMatch ? getMatchWinner(finalMatch,missRule,overRule) : null;
+    const sides=finalMatch && (finalMatch.customSides||finalMatch.sides);
+    return {over:true,winnerNames:winner===null?[]:[sides[winner].name]};
+  }
+  if(type === "league") {
+    const winners=[];
+    for(const block of getLeagueStandings(set)) {
+      const leaders=block.standings.filter(row=>row.rank===1);
+      if(leaders.length===1) { winners.push(leaders[0].name); continue; }
+      const playoff=matches.find(match=>match.leaguePlayoff&&(match.blockName||null)===(block.name==="全体"?null:block.name));
+      if(!playoff)return {over:false,winnerNames:[]};
+      const winner=getMatchWinner(playoff,missRule,overRule);
+      if(winner===null)return {over:false,winnerNames:[]};
+      const sides=playoff.customSides||playoff.sides;winners.push(sides[winner].name);
+    }
+    return {over:true,winnerNames:uniq(winners)};
+  }
   return {over:allCompleted, winnerNames:[]};
 }
 
@@ -471,6 +599,12 @@ function tally(room){
           if(r.winner!==null){t.played++;if(r.winner===i)t.win++;}
         }));
       });
+    });
+    const setResult=summarize(set);
+    if(setResult.over) setResult.winnerNames.forEach(name=>{
+      const side=set.sides.find(item=>item.name===name);
+      if(side && set.type==="team") side.players.forEach(player=>get(player).setWin++);
+      else get(name).setWin++;
     });
   });
   return Object.values(T).sort((a,b)=> b.win-a.win || (b.played?b.win/b.played:0)-(a.played?b.win/a.played:0) || b.pts-a.pts);
@@ -503,15 +637,22 @@ function updateTeamCheckboxes(){
     teamAssignments[count] = {};
   }
   
-  const existingCards = document.querySelectorAll(".team-card");
-  if(existingCards.length > 0) {
-    existingCards.forEach((card, i) => {
+  if(!Array.isArray(teamOrder[count]) || teamOrder[count].length !== count) {
+    teamOrder[count] = Array.from({length: count}, (_, i) => i);
+  }
+  const existingCards = [...document.querySelectorAll(".team-card")];
+  if(existingCards.length === count) {
+    const visualOrder = existingCards.map(card => parseInt(card.dataset.index, 10));
+    if(visualOrder.every(i => Number.isInteger(i) && i >= 0 && i < count) && new Set(visualOrder).size === count) {
+      teamOrder[count] = visualOrder;
+    }
+    existingCards.forEach(card => {
+      const teamIndex = parseInt(card.dataset.index, 10);
+      if(!Number.isInteger(teamIndex) || teamIndex < 0 || teamIndex >= count) return;
       card.querySelectorAll(".team-member-item").forEach(item => {
         const chk = item.querySelector("input[type=checkbox]");
         const nameVal = item.dataset.name;
-        if(chk && chk.checked && nameVal) {
-          teamAssignments[count][nameVal] = i;
-        }
+        if(chk && chk.checked && nameVal) teamAssignments[count][nameVal] = teamIndex;
       });
     });
   }
@@ -524,7 +665,7 @@ function updateTeamCheckboxes(){
   });
   
   let html="";
-  for(let i=0; i<count; i++){
+  for(const i of teamOrder[count]){
     const teamName = teamNamesDefault[i] || `チーム${i+1}`;
     html += `<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px;" class="team-card" data-index="${i}">
       <b>${teamName}</b>
@@ -581,14 +722,21 @@ $("add-opponent-btn").onclick = () => {
   const targetTeamIndex = count - 1;
   const size = parseInt($("opponent-size").value) || 2;
   if(!teamAssignments[count]) teamAssignments[count] = {};
-  
-  Object.keys(teamAssignments[count]).forEach(n => {
-    if(teamAssignments[count][n] === targetTeamIndex && n.includes("チームの")) {
-      delete teamAssignments[count][n];
-    }
-  });
-  
   const teamName = teamNamesDefault[targetTeamIndex] || `チーム${targetTeamIndex+1}`;
+  const syntheticPrefix = `${teamName}の`;
+  const previousSyntheticNames = Object.keys(teamAssignments[count]).filter(name =>
+    teamAssignments[count][name] === targetTeamIndex &&
+    name.startsWith(syntheticPrefix) && /^\d+人目$/.test(name.slice(syntheticPrefix.length))
+  );
+  previousSyntheticNames.forEach(name => {
+    delete teamAssignments[count][name];
+    const stillAssigned = Object.values(teamAssignments).some(assignments => assignments && Object.prototype.hasOwnProperty.call(assignments, name));
+    const usedInSavedSet = (data.sets || []).some(set => {
+      const sides = [...(set.sides || []), ...(set.matches || []).flatMap(match => [...(match.sides || []), ...(match.customSides || [])])];
+      return sides.some(side => (side.players || []).includes(name));
+    });
+    if(!stillAssigned && !usedInSavedSet) data.players = data.players.filter(player => player !== name);
+  });
   for(let j=1; j<=size; j++) {
     const fakeName = `${teamName}の${j}人目`;
     if(!data.players.includes(fakeName)) data.players.push(fakeName);
@@ -623,7 +771,7 @@ window.addMemberToTeam = (teamIndex, selectElem, count) => {
 window.sortTeam = (index, direction) => {
   const container = $("team-containers");
   const cards = [...container.querySelectorAll(".team-card")];
-  const targetCard = cards.find(c => parseInt(c.dataset.index) === index);
+  const targetCard = cards.find(card => parseInt(card.dataset.index, 10) === index);
   if(!targetCard) return;
   if(direction === 'up') {
     const prev = targetCard.previousElementSibling;
@@ -632,10 +780,13 @@ window.sortTeam = (index, direction) => {
     const next = targetCard.nextElementSibling;
     if(next) container.insertBefore(targetCard, next.nextElementSibling);
   }
+  const count = parseInt($("teamcount").value, 10) || 2;
+  teamOrder[count] = [...container.querySelectorAll(".team-card")].map(card => parseInt(card.dataset.index, 10));
+  updateTeamCheckboxes();
 };
 
 window.sortTeamMember = (btn, direction) => {
-  const item = btn.closest(".next-member-item") || btn.closest(".team-member-item") || btn.closest(".next-side-item");
+  const item = btn.closest(".next-member-item") || btn.closest(".team-member-item") || btn.closest(".next-team-card") || btn.closest(".next-side-item");
   if(!item) return;
   if(direction === 'up') {
     const prev = item.previousElementSibling;
@@ -698,7 +849,7 @@ function renderNextOrderForm(set) {
     html = `<div style="background:#fff; padding:8px; border-radius:6px; border:1px solid #ddd;" id="next-sides-group">` +
       lastMatchSides.map((s, idx) => {
         return `<div style="display:flex; justify-content:space-between; align-items:center; margin:6px 0; padding:6px; background:#f9f9f9; border-radius:4px;" class="next-side-item" data-side-name="${esc(s.name)}" data-side-players='${JSON.stringify(s.players)}'>
-          <span style="font-weight:bold;">${idx === 0 ? "🔵 先攻: " : idx === 1 ? "🔴 後攻: " : "🟡 3番手: "} ${esc(s.name)}</span>
+          <span style="font-weight:bold;">${idx === 0 ? "🔵 1番手: " : idx === 1 ? "🔴 2番手: " : `🟡 ${idx+1}番手: `} ${esc(s.name)}</span>
           <div>
             <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
             <button type="button" class="sub" style="font-size:12px;padding:2px 6px;margin-left:4px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button>
@@ -715,6 +866,18 @@ $("toggle-order-edit-btn").onclick = () => {
   isOrderHidden = !isOrderHidden;
   const set = data.sets[cur];
   if(set) renderNextOrderForm(set);
+};
+
+$("toggle-tournament-overview").onclick = () => {
+  isScheduleHidden = !isScheduleHidden;
+  $("tournament-tree-content").style.display = isScheduleHidden ? "none" : "block";
+  $("toggle-tournament-overview").textContent = isScheduleHidden ? "展開する" : "折りたたむ";
+};
+
+$("toggle-block-config").onclick = () => {
+  isBlockConfigHidden = !isBlockConfigHidden;
+  $("block-config-content").style.display = isBlockConfigHidden ? "none" : "block";
+  $("toggle-block-config").textContent = isBlockConfigHidden ? "展開する" : "折りたたむ";
 };
 
 function getTeamSides(){
@@ -829,74 +992,88 @@ async function createSet(set){
     if(uniq(names).length!==names.length){alert("同じ名前が重複しています");return;}
     
     let matches = [];
-    const totalGames = set.games || 3;
+    const configuredGames = Math.max(1, parseInt(set.games,10)||3);
+    // 先取り方式は最初の1試合だけ作り、必要に応じて次ラウンドを追加する
+    const totalGames = (set.type === "team" || set.type === "solo") && set.mode === "first" ? 1 : configuredGames;
     
     if(set.type === "tournament"){
       if(set.sides.length < 4 || set.sides.length > 8) {
         alert("トーナメントモードは4～8人で利用できます");
         return;
       }
-      const shuffled = shuffleArray(set.sides);
-      const n = shuffled.length;
-      let tournamentMode = $("ntournament-mode").value;
-      if(set.mode === "total") {
+      let tournamentSides=[...set.sides];
+      const firstGameRule=$("nfirstgame")?$("nfirstgame").value:"order";
+      if(firstGameRule==="custom") {
+        // カスタムはセット作成画面で並べ替えた参加者順を使う
+        tournamentSides=[...set.sides];
+      } else if(firstGameRule==="shuffle") {
+        tournamentSides=shuffleArray(tournamentSides);
+      } else if(firstGameRule==="reverse") {
+        tournamentSides.reverse();
+      } else {
+        // 登録順はルームに登録された順を優先し、新規参加者は選択順を保つ
+        const selectedOrder=new Map(tournamentSides.map((side,index)=>[side.name,index]));
+        const registeredOrder=Array.isArray(data?.players)?data.players:[];
+        const registrationIndex=new Map(registeredOrder.map((name,index)=>[name,index]));
+        tournamentSides.sort((a,b)=>{
+          const ai=registrationIndex.has(a.name)?registrationIndex.get(a.name):Number.MAX_SAFE_INTEGER;
+          const bi=registrationIndex.has(b.name)?registrationIndex.get(b.name):Number.MAX_SAFE_INTEGER;
+          return ai-bi || selectedOrder.get(a.name)-selectedOrder.get(b.name);
+        });
+      }
+      const n = tournamentSides.length;
+      let tournamentMode = set.tournamentMode || $("ntournament-mode").value;
+      if(set.mode === "total" && !set.tournamentMode) {
         tournamentMode = set.games > 1 ? "match_total" : "game1";
         $("ntournament-mode").value = tournamentMode;
+      } else if(!set.tournamentMode && !tournamentModeManuallySet) {
+        tournamentMode = set.games > 1 ? "match_total" : "game1";
       }
-      
-      if (n === 8) {
-        const addBracketMatch = (sides, bracket) => matches.push({ sides, start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode, bracket });
-        addBracketMatch([shuffled[0], shuffled[1]], "m1");
-        addBracketMatch([shuffled[2], shuffled[3]], "m2");
-        addBracketMatch([shuffled[4], shuffled[5]], "m3");
-        addBracketMatch([shuffled[6], shuffled[7]], "m4");
-        addBracketMatch([shuffled[0], shuffled[1]], "loser_round1");
-        addBracketMatch([shuffled[2], shuffled[3]], "loser_round2");
-        addBracketMatch([shuffled[0], shuffled[1]], "semi1");
-        addBracketMatch([shuffled[2], shuffled[3]], "semi2");
-        addBracketMatch([shuffled[0], shuffled[1]], "loser_final");
-        addBracketMatch([shuffled[0], shuffled[1]], "bronze");
-        addBracketMatch([shuffled[0], shuffled[1]], "final");
-      } else if (n === 7) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
-        matches.push({ sides: [shuffled[4], shuffled[5]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m3" });
-        matches.push({ sides: [shuffled[0], shuffled[1], shuffled[2]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
-        matches.push({ sides: [shuffled[6], shuffled[0]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
-      } else if (n === 6) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
-        matches.push({ sides: [shuffled[4], shuffled[0]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
-        matches.push({ sides: [shuffled[5], shuffled[0]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_final" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
-      } else if (n === 5) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m1" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "m2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser_round1" });
-        matches.push({ sides: [shuffled[4], shuffled[0]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi1" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "semi2" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
-      } else if (n === 4) {
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main" });
-        matches.push({ sides: [shuffled[2], shuffled[3]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "loser" });
-        matches.push({ sides: [shuffled[0], shuffled[1]], start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "final" });
-      } else {
-        for(let i=0; i<n; i+=2){
-          if(i+1 < n) {
-            matches.push({
-              sides: [shuffled[i], shuffled[i+1]],
-              start: 0, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: tournamentMode, bracket: "main"
-            });
-          }
-        }
+      const addMatch=(bracket,sides,nextWin=null,nextLose=null)=>matches.push({sides,start:0,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode,bracket,nextWin,nextLose});
+      const edge=(match,slot)=>({match,slot});
+      if(n===4) {
+        addMatch("semi1",[tournamentSides[0],tournamentSides[1]],edge("final",0),edge("bronze",0));
+        addMatch("semi2",[tournamentSides[2],tournamentSides[3]],edge("final",1),edge("bronze",1));
+        addMatch("bronze",[null,null]);
+        addMatch("final",[null,null]);
+      } else if(n===5) {
+        addMatch("m1",[tournamentSides[0],tournamentSides[1]],edge("semi1",1),edge("consolation",0));
+        addMatch("semi1",[tournamentSides[2],null],edge("final",0),edge("bronze",0));
+        addMatch("semi2",[tournamentSides[3],tournamentSides[4]],edge("final",1),edge("bronze",1));
+        addMatch("bronze",[null,null],null,edge("consolation",1));
+        addMatch("consolation",[null,null]);
+        addMatch("final",[null,null]);
+      } else if(n===6) {
+        addMatch("m1",[tournamentSides[0],tournamentSides[1]],edge("semi1",1),edge("loser_round1",0));
+        addMatch("m2",[tournamentSides[2],tournamentSides[3]],edge("semi2",1),edge("loser_round1",1));
+        addMatch("loser_round1",[null,null]);
+        addMatch("semi1",[tournamentSides[4],null],edge("final",0),edge("bronze",0));
+        addMatch("semi2",[tournamentSides[5],null],edge("final",1),edge("bronze",1));
+        addMatch("bronze",[null,null]);
+        addMatch("final",[null,null]);
+      } else if(n===7) {
+        addMatch("m1",[tournamentSides[0],tournamentSides[1]],edge("semi1",1),edge("loser_round1",0));
+        addMatch("m2",[tournamentSides[2],tournamentSides[3]],edge("semi2",0),edge("loser_round1",1));
+        addMatch("m3",[tournamentSides[4],tournamentSides[5]],edge("semi2",1),edge("loser_round1",2));
+        addMatch("loser_round1",[null,null,null]);
+        addMatch("semi1",[tournamentSides[6],null],edge("final",0),edge("bronze",0));
+        addMatch("semi2",[null,null],edge("final",1),edge("bronze",1));
+        addMatch("bronze",[null,null]);
+        addMatch("final",[null,null]);
+      } else if(n===8) {
+        addMatch("m1",[tournamentSides[0],tournamentSides[1]],edge("semi1",0),edge("loser_round1",0));
+        addMatch("m2",[tournamentSides[2],tournamentSides[3]],edge("semi1",1),edge("loser_round1",1));
+        addMatch("m3",[tournamentSides[4],tournamentSides[5]],edge("semi2",0),edge("loser_round2",0));
+        addMatch("m4",[tournamentSides[6],tournamentSides[7]],edge("semi2",1),edge("loser_round2",1));
+        addMatch("loser_round1",[null,null]);
+        addMatch("loser_round2",[null,null]);
+        addMatch("semi1",[null,null],edge("final",0),edge("bronze",0));
+        addMatch("semi2",[null,null],edge("final",1),edge("bronze",1));
+        addMatch("bronze",[null,null]);
+        addMatch("final",[null,null]);
       }
       if(tournamentMode === "match_total") {
-        matches.forEach(match => { match.gamesToPlay = Math.max(2, parseInt(set.games, 10) || 2); });
+        matches.forEach(match => { match.gamesToPlay = Math.max(1, parseInt(set.games, 10) || 1); });
       }
     } else if(set.type === "league"){
       const pairs = [];
@@ -906,7 +1083,7 @@ async function createSet(set){
         }
       }
       const shuffledPairs = shuffleArray(pairs);
-      const leagueMode = set.mode === "total" && set.games > 1 ? "match_total" : "game1";
+      const leagueMode = set.games > 1 ? "match_total" : "game1";
       matches = shuffledPairs.map(p => {
         const match = {
           sides: [p[0], p[1]],
@@ -953,9 +1130,8 @@ async function createSet(set){
           // 団体戦は選択した全チームが同じ1試合に参加する
           initialSides = [...set.sides];
         } else if(set.type === "solo" && set.sides.length >= 2) {
-          const rotatedSides = [...set.sides];
-          for(let r=0; r<g; r++) { rotatedSides.push(rotatedSides.shift()); }
-          initialSides = [rotatedSides[0], rotatedSides[1]];
+          // 個人フリーはブロック内の全員が同じ試合に参加する
+          initialSides = [...set.sides];
         }
 
         matches.push({
@@ -993,7 +1169,8 @@ $("mkset").onclick=()=>{
   const missRule=$("nmissrule").value;
   const overRule=$("noverrule").value;
   isOrderHidden = false;
-  createSet({type, sides, mode:$("nmode").value, games, missRule, overRule, firstRule:$("nfirst").value});
+  const mode = type === "team" || type === "solo" ? $("nmode").value : "fixed";
+  createSet({type, sides, mode, games, missRule, overRule, firstRule:$("nfirst").value, ...(type === "tournament" ? {tournamentMode:$("ntournament-mode").value} : {})});
 };
 
 $("copyset").onclick=()=>{
@@ -1001,7 +1178,7 @@ $("copyset").onclick=()=>{
   if(!l){alert("コピーできる前のセットがありません");return;}
   if(l.type === "tournament" && (l.sides.length < 4 || l.sides.length > 8)){alert("トーナメントモードは4～8人で利用できます");return;}
   isOrderHidden = false;
-  createSet({type:l.type, sides:l.sides, mode:l.mode, games:l.games, missRule:l.missRule||"out", overRule:l.overRule||"25", firstRule:l.firstRule});
+  createSet({type:l.type, sides:l.sides, mode:l.mode, games:l.games, missRule:l.missRule||"out", overRule:l.overRule||"25", firstRule:l.firstRule, ...(l.tournamentMode ? {tournamentMode:l.tournamentMode} : {})});
 };
 
 $("addbtn").onclick=async()=>{
@@ -1092,7 +1269,8 @@ $("save-order").onclick = () => {
   if (set.type === "team") {
     const nextTeamCards = document.querySelectorAll(".next-team-card");
     nextTeamCards.forEach((card, idx) => {
-      const origSide = origSides[idx];
+      const origIndex = parseInt(card.dataset.sideIndex, 10);
+      const origSide = origSides[origIndex];
       const memberItems = card.querySelectorAll(".next-member-item");
       const newPlayers = [...memberItems].map(item => item.dataset.member);
       newCustomSides.push({name: origSide.name, players: newPlayers});
@@ -1132,7 +1310,7 @@ async function proceedToNextStep(customSides) {
     const gIdx = match.currentGameIndex || 0;
     const g1 = getGameThrows(match, 0), g2 = getGameThrows(match, 1), g3 = getGameThrows(match, 2);
     if (mode === "match_total" || mode === "match2_total") {
-      const gamesToPlay = mode === "match2_total" ? 2 : Math.max(2, parseInt(match.gamesToPlay, 10) || 2);
+      const gamesToPlay = mode === "match2_total" ? 2 : Math.max(1, parseInt(match.gamesToPlay, 10) || 1);
       if(gIdx < gamesToPlay - 1) {
         match.currentGameIndex = gIdx + 1;
         const nextGameKey = `game${match.currentGameIndex + 1}`;
@@ -1168,201 +1346,100 @@ async function proceedToNextStep(customSides) {
       }
     }
     
-    if(s.type === "tournament" && s.sides.length === 8) {
-      const byBracket = key => s.matches.find(item => item.bracket === key);
-      const firstRound = ["m1", "m2", "m3", "m4"].map(byBracket);
-      const loser1 = byBracket("loser_round1"), loser2 = byBracket("loser_round2");
-      const semi1 = byBracket("semi1"), semi2 = byBracket("semi2");
-      const loserFinal = byBracket("loser_final"), bronze = byBracket("bronze"), finalMatch = byBracket("final");
-      if(firstRound.every(item => item && getMatchWinner(item, s.missRule, s.overRule) !== null)) {
-        const winners = firstRound.map(item => (item.customSides || item.sides)[getMatchWinner(item, s.missRule, s.overRule)]);
-        const losers = firstRound.map(item => (item.customSides || item.sides)[1 - getMatchWinner(item, s.missRule, s.overRule)]);
-        loser1.sides = [losers[0], losers[1]]; loser1.customSides = loser1.sides;
-        loser2.sides = [losers[2], losers[3]]; loser2.customSides = loser2.sides;
-        semi1.sides = [winners[0], winners[1]]; semi1.customSides = semi1.sides;
-        semi2.sides = [winners[2], winners[3]]; semi2.customSides = semi2.sides;
+    if(s.type==="tournament") {
+      const winnerIndex=getMatchWinner(match,s.missRule,s.overRule,false);
+      if(winnerIndex!==null) {
+        const participants=match.customSides||match.sides;
+        const routeTo=(feed,entrant)=>{
+          if(!feed||!entrant)return;
+          const target=s.matches.find(item=>item.bracket===feed.match);
+          if(!target)return;
+          const slot=feed.slot;
+          const targetSides=[...(target.customSides||target.sides)];
+          const previous=targetSides[slot];
+          if(previous&&previous.name!==entrant.name) {
+            target.game1=[];target.game2=[];target.game3=[];target.throws=[];target.currentGameIndex=0;
+          }
+          targetSides[slot]=entrant;
+          target.sides=targetSides;target.customSides=targetSides;
+        };
+        routeTo(match.nextWin,participants[winnerIndex]);
+        if(participants.length===2) routeTo(match.nextLose,participants[winnerIndex===0?1:0]);
       }
-      if(semi1 && semi2 && getMatchWinner(semi1, s.missRule, s.overRule) !== null && getMatchWinner(semi2, s.missRule, s.overRule) !== null) {
-        const s1 = semi1.customSides || semi1.sides, s2 = semi2.customSides || semi2.sides;
-        const w1 = getMatchWinner(semi1, s.missRule, s.overRule), w2 = getMatchWinner(semi2, s.missRule, s.overRule);
-        finalMatch.sides = [s1[w1], s2[w2]]; finalMatch.customSides = finalMatch.sides;
-        bronze.sides = [s1[1-w1], s2[1-w2]]; bronze.customSides = bronze.sides;
-      }
-      if(loser1 && loser2 && getMatchWinner(loser1, s.missRule, s.overRule) !== null && getMatchWinner(loser2, s.missRule, s.overRule) !== null) {
-        const a = loser1.customSides || loser1.sides, b = loser2.customSides || loser2.sides;
-        loserFinal.sides = [a[getMatchWinner(loser1, s.missRule, s.overRule)], b[getMatchWinner(loser2, s.missRule, s.overRule)]];
-        loserFinal.customSides = loserFinal.sides;
-      }
-    } else if(s.type === "tournament" && s.sides.length === 7){
-      const m1 = s.matches.find(m => m.bracket === "m1");
-      const m2 = s.matches.find(m => m.bracket === "m2");
-      const m3 = s.matches.find(m => m.bracket === "m3");
-      const loserRound1 = s.matches.find(m => m.bracket === "loser_round1");
-      const semi1 = s.matches.find(m => m.bracket === "semi1");
-      const semi2 = s.matches.find(m => m.bracket === "semi2");
-      const finalMatch = s.matches.find(m => m.bracket === "final");
+    }
 
-      if (m1 && m2 && m3 && getMatchWinner(m1, s.missRule, s.overRule) !== null && getMatchWinner(m2, s.missRule, s.overRule) !== null && getMatchWinner(m3, s.missRule, s.overRule) !== null) {
-        const w1 = getMatchWinner(m1, s.missRule, s.overRule);
-        const l1 = w1 === 0 ? 1 : 0;
-        const s1 = m1.customSides || m1.sides;
-
-        const w2 = getMatchWinner(m2, s.missRule, s.overRule);
-        const l2 = w2 === 0 ? 1 : 0;
-        const s2 = m2.customSides || m2.sides;
-
-        const w3 = getMatchWinner(m3, s.missRule, s.overRule);
-        const l3 = w3 === 0 ? 1 : 0;
-        const s3 = m3.customSides || m3.sides;
-
-        if (loserRound1) {
-          loserRound1.sides = [s1[l1], s2[l2], s3[l3]];
-          loserRound1.customSides = [s1[l1], s2[l2], s3[l3]];
-        }
-        if (semi1) {
-          semi1.sides[1] = s1[w1];
-          if(!semi1.customSides) semi1.customSides = [semi1.sides[0], semi1.sides[1]];
-          else semi1.customSides[1] = s1[w1];
-        }
-        if (semi2) {
-          semi2.sides = [s2[w2], s3[w3]];
-          if(!semi2.customSides) semi2.customSides = [semi2.sides[0], semi2.sides[1]];
-          else { semi2.customSides[0] = s2[w2]; semi2.customSides[1] = s3[w3]; }
-        }
-      }
-
-      if (semi1 && semi2 && getMatchWinner(semi1, s.missRule, s.overRule) !== null && getMatchWinner(semi2, s.missRule, s.overRule) !== null) {
-        const sw1 = getMatchWinner(semi1, s.missRule, s.overRule);
-        const sSides1 = semi1.customSides || semi1.sides;
-
-        const sw2 = getMatchWinner(semi2, s.missRule, s.overRule);
-        const sSides2 = semi2.customSides || semi2.sides;
-
-        if (finalMatch) {
-          finalMatch.sides = [sSides1[sw1], sSides2[sw2]];
-          finalMatch.customSides = [sSides1[sw1], sSides2[sw2]];
-        }
-      }
-    } else if(s.type === "tournament" && s.sides.length === 6){
-      const m1 = s.matches.find(m => m.bracket === "m1");
-      const m2 = s.matches.find(m => m.bracket === "m2");
-      const loserRound1 = s.matches.find(m => m.bracket === "loser_round1");
-      const semi1 = s.matches.find(m => m.bracket === "semi1");
-      const semi2 = s.matches.find(m => m.bracket === "semi2");
-      const loserFinal = s.matches.find(m => m.bracket === "loser_final");
-      const finalMatch = s.matches.find(m => m.bracket === "final");
-
-      if (m1 && m2 && getMatchWinner(m1, s.missRule, s.overRule) !== null && getMatchWinner(m2, s.missRule, s.overRule) !== null) {
-        const w1 = getMatchWinner(m1, s.missRule, s.overRule);
-        const l1 = w1 === 0 ? 1 : 0;
-        const s1 = m1.customSides || m1.sides;
-        const w2 = getMatchWinner(m2, s.missRule, s.overRule);
-        const l2 = w2 === 0 ? 1 : 0;
-        const s2 = m2.customSides || m2.sides;
-
-        if (loserRound1) {
-          loserRound1.sides = [s1[l1], s2[l2]];
-          loserRound1.customSides = [s1[l1], s2[l2]];
-        }
-        if (semi1) {
-          semi1.sides[1] = s1[w1];
-          if(!semi1.customSides) semi1.customSides = [semi1.sides[0], semi1.sides[1]];
-          else semi1.customSides[1] = s1[w1];
-        }
-        if (semi2) {
-          semi2.sides[1] = s2[w2];
-          if(!semi2.customSides) semi2.customSides = [semi2.sides[0], semi2.sides[1]];
-          else semi2.customSides[1] = s2[w2];
-        }
-      }
-
-      if (semi1 && semi2 && getMatchWinner(semi1, s.missRule, s.overRule) !== null && getMatchWinner(semi2, s.missRule, s.overRule) !== null) {
-        const sw1 = getMatchWinner(semi1, s.missRule, s.overRule);
-        const sl1 = sw1 === 0 ? 1 : 0;
-        const sSides1 = semi1.customSides || semi1.sides;
-        const sw2 = getMatchWinner(semi2, s.missRule, s.overRule);
-        const sl2 = sw2 === 0 ? 1 : 0;
-        const sSides2 = semi2.customSides || semi2.sides;
-
-        if (finalMatch) {
-          finalMatch.sides = [sSides1[sw1], sSides2[sw2]];
-          finalMatch.customSides = [sSides1[sw1], sSides2[sw2]];
-        }
-        if (loserFinal) {
-          loserFinal.sides = [sSides1[sl1], sSides2[sl2]];
-          loserFinal.customSides = [sSides1[sl1], sSides2[sl2]];
-        }
-      }
-    } else if(s.type === "tournament" && s.sides.length === 5){
-      const m1 = s.matches.find(m => m.bracket === "m1");
-      const m2 = s.matches.find(m => m.bracket === "m2");
-      const loserRound1 = s.matches.find(m => m.bracket === "loser_round1");
-      const semi1 = s.matches.find(m => m.bracket === "semi1");
-      const semi2 = s.matches.find(m => m.bracket === "semi2");
-      const finalMatch = s.matches.find(m => m.bracket === "final");
-
-      if (m1 && m2 && getMatchWinner(m1, s.missRule, s.overRule) !== null && getMatchWinner(m2, s.missRule, s.overRule) !== null) {
-        const w1 = getMatchWinner(m1, s.missRule, s.overRule);
-        const l1 = w1 === 0 ? 1 : 0;
-        const s1 = m1.customSides || m1.sides;
-
-        const w2 = getMatchWinner(m2, s.missRule, s.overRule);
-        const l2 = w2 === 0 ? 1 : 0;
-        const s2 = m2.customSides || m2.sides;
-
-        if (loserRound1) {
-          loserRound1.sides = [s1[l1], s2[l2]];
-          loserRound1.customSides = [s1[l1], s2[l2]];
-        }
-        if (semi1) {
-          semi1.sides[1] = s1[w1];
-          if(!semi1.customSides) semi1.customSides = [semi1.sides[0], semi1.sides[1]];
-          else semi1.customSides[1] = s1[w1];
-        }
-        if (semi2) {
-          semi2.sides[1] = s2[w2];
-          if(!semi2.customSides) semi2.customSides = [semi2.sides[0], semi2.sides[1]];
-          else semi2.customSides[1] = s2[w2];
-        }
-      }
-      if (semi1 && semi2 && getMatchWinner(semi1, s.missRule, s.overRule) !== null && getMatchWinner(semi2, s.missRule, s.overRule) !== null) {
-        const sw1 = getMatchWinner(semi1, s.missRule, s.overRule);
-        const sSides1 = semi1.customSides || semi1.sides;
-        const sw2 = getMatchWinner(semi2, s.missRule, s.overRule);
-        const sSides2 = semi2.customSides || semi2.sides;
-        if (finalMatch) {
-          finalMatch.sides = [sSides1[sw1], sSides2[sw2]];
-          finalMatch.customSides = [sSides1[sw1], sSides2[sw2]];
-        }
-      }
-    } else if(s.type === "tournament" && s.sides.length === 4){
-      const mainMatches = s.matches.filter(m => m.bracket === "main" || !m.bracket);
-      const mainCompleted = mainMatches.length > 0 && mainMatches.every(m => getMatchWinner(m, s.missRule, s.overRule) !== null);
-
-      if(mainCompleted) {
-        const losers = [];
-        const winners = [];
-        mainMatches.forEach(m => {
-          const mw = getMatchWinner(m, s.missRule, s.overRule);
-          const mSides = m.customSides || m.sides;
-          winners.push(mSides[mw]);
-          losers.push(mSides[mw === 0 ? 1 : 0]);
+    if((s.type === "team" || s.type === "solo") && s.mode === "first") {
+      const target=Math.max(1,parseInt(s.games,10)||1);
+      const blocks=s.type==="solo"&&Array.isArray(s.blocks)&&s.blocks.length?s.blocks:[{name:null,players:s.sides.map(side=>side.name)}];
+      const blockForMatch=match.blockName||null;
+      const activeBlock=blocks.find(block=>(block.name||null)===blockForMatch);
+      if(activeBlock) {
+        const wins=new Map((activeBlock.players||[]).map(name=>[name,0]));
+        s.matches.filter(item=>(item.blockName||null)===blockForMatch&&!item.skipped).forEach(item=>{
+          const winner=getMatchWinner(item,s.missRule,s.overRule,s.type==="team");
+          if(winner!==null){const sides=item.customSides||item.sides;const name=sides[winner]?.name;if(wins.has(name))wins.set(name,wins.get(name)+1);}
         });
-
-        const loserMatch = s.matches.find(m => m.bracket === "loser");
-        const finalMatch = s.matches.find(m => m.bracket === "final");
-
-        if(loserMatch && losers.length >= 2) {
-          loserMatch.sides = [losers[0], losers[1]];
-          loserMatch.customSides = [losers[0], losers[1]];
+        if([...wins.values()].some(count=>count>=target)) {
+          s.matches.forEach((item,index)=>{if(index>s.activeMatchIndex&&(item.blockName||null)===blockForMatch&&!item.skipped)item.skipped=true;});
         }
-        if(finalMatch && winners.length >= 2) {
-          finalMatch.sides = [winners[0], winners[1]];
-          finalMatch.customSides = [winners[0], winners[1]];
+      }
+      let nextIndex=s.activeMatchIndex+1;
+      while(nextIndex<s.matches.length&&s.matches[nextIndex].skipped)nextIndex++;
+      if(nextIndex<s.matches.length) {
+        s.activeMatchIndex=nextIndex;
+        const next=s.matches[nextIndex];next.currentGameIndex=0;next.throws=next.game1||[];
+        return;
+      }
+      const added=[];
+      blocks.forEach(block=>{
+        const names=block.players||[];
+        const winCounts=new Map(names.map(name=>[name,0]));
+        const blockMatches=s.matches.filter(item=>(item.blockName||null)===(block.name||null)&&!item.skipped);
+        blockMatches.forEach(item=>{const winner=getMatchWinner(item,s.missRule,s.overRule,s.type==="team");if(winner!==null){const sides=item.customSides||item.sides;const name=sides[winner]?.name;if(winCounts.has(name))winCounts.set(name,winCounts.get(name)+1);}});
+        if([...winCounts.values()].some(count=>count>=target))return;
+        const maximum=(target-1)*Math.max(1,names.length)+1;
+        if(blockMatches.length>=maximum)return;
+        const sides=s.type==="team"?s.sides:names.map(name=>s.sides.find(side=>side.name===name)).filter(Boolean);
+        if(sides.length<2)return;
+        const round=blockMatches.length+1;
+        const previous=blockMatches[blockMatches.length-1];
+        let start=0;
+        if(previous) {
+          if(s.firstRule==="loser") {
+            const previousSides=previous.customSides||previous.sides;
+            const previousResult=replay(previousSides,getGameThrows(previous,0),previous.start,s.type==="team",s.missRule,s.overRule);
+            if(previousResult.winner!==null) start=previousResult.st.reduce((min,row,index,all)=>row.score<all[min].score?index:min,0);
+            else start=(previous.start+1)%sides.length;
+          } else if(s.firstRule==="rotate") start=(previous.start+1)%sides.length;
+          else start=0;
+        }
+        added.push({sides,start,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:"game1",...(block.name?{blockName:block.name,round}:{})});
+      });
+      if(added.length){s.matches.push(...added);s.activeMatchIndex=s.matches.length-added.length;}
+      return;
+    }
+
+    if(s.type==="league") {
+      const regular=s.matches.filter(item=>!item.leaguePlayoff);
+      const playoffs=s.matches.filter(item=>item.leaguePlayoff);
+      const regularDone=regular.length>0&&regular.every(item=>getMatchWinner(item,s.missRule,s.overRule)!==null);
+      if(regularDone&&playoffs.length===0&&s.activeMatchIndex===regular.length-1) {
+        const tiedBlocks=getLeagueStandings(s).map(block=>({block,leaders:block.standings.filter(row=>row.rank===1)})).filter(item=>item.leaders.length>1);
+        if(tiedBlocks.length) {
+          tiedBlocks.forEach(({block,leaders})=>{
+            const sides=leaders.map(row=>s.sides.find(side=>side.name===row.name)).filter(Boolean);
+            const mode=s.games>1?"match_total":"game1";
+            const playoff={sides,start:0,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:mode,leaguePlayoff:true};
+            if(block.name!=="全体")playoff.blockName=block.name;
+            if(mode==="match_total")playoff.gamesToPlay=Math.max(2,parseInt(s.games,10)||2);
+            s.matches.push(playoff);
+          });
+          s.activeMatchIndex=regular.length;
+          return;
         }
       }
     }
-    
+
     if((s.type === "team" || s.type === "solo") && s.mode === "total") {
       const regularMatches = s.matches.filter(item => !item.totalTiebreak);
       const tieBreakExists = s.matches.some(item => item.totalTiebreak);
@@ -1391,11 +1468,8 @@ async function proceedToNextStep(customSides) {
       nextM.throws = nextM.game1;
       if(customSides) nextM.customSides = customSides;
     } else {
-      const nextStartPlayer = 0;
-      const newMatch = {start: nextStartPlayer, throws: [], game1: [], game2: [], game3: [], currentGameIndex: 0, tournamentMode: mode};
-      if(customSides) newMatch.customSides = customSides;
-      s.matches.push(newMatch);
-      s.activeMatchIndex++;
+      // 予定試合の末尾に達した時は、先取り以外の方式で自動追加しない
+      return;
     }
   });
 }
@@ -1408,7 +1482,7 @@ $("delset").onclick=()=>{
 };
 
 $("copystats").onclick=async()=>{
-  const rows=[["名前","試合数","勝","勝率","セット優勝","投球数","合計点","平均点/投","0点回数"]];
+  const rows=[["名前","試合数","勝","勝率","セット優勝","投球数","総得点","平均点/投","0点回数"]];
   tally(data).forEach(t=>rows.push([t.name,t.played,t.win,t.played?(t.win/t.played).toFixed(3):"",t.setWin,t.n,t.pts,t.n?(t.pts/t.n).toFixed(2):"",t.zero]));
   const txt=rows.map(r=>r.join("\t")).join("\n");
   try{await navigator.clipboard.writeText(txt);alert("コピーしました。Excelに貼り付けてください。");}
@@ -1494,6 +1568,82 @@ function render(){
   if(view==="stats") {stopTimer(); renderStats();}
 }
 
+let pendingSoloBlockCount = null;
+function renderSoloBlockConfig(set){
+  const card = $("solo-block-card");
+  if(set.type !== "solo" && set.type !== "league") { card.classList.add("hide"); return; }
+  if(set.type === "league" && set.blockCount && Array.isArray(set.blocks) && set.blocks.length) { card.classList.add("hide"); return; }
+  card.classList.remove("hide");
+  $("block-config-content").style.display = isBlockConfigHidden ? "none" : "block";
+  $("toggle-block-config").textContent = isBlockConfigHidden ? "展開する" : "折りたたむ";
+  $("block-config-title").textContent = set.type === "league" ? "リーグ戦のブロック設定" : "個人フリーのブロック設定";
+  $("block-config-desc").textContent = set.type === "league" ? "参加者を1～3ブロックに分け、各ブロック内で総当たり対戦を行います。試合開始前に設定してください。各ブロックに2人以上必要です。" : "参加者を1～3ブロックに分けます。同じブロックの全員が一斉に対戦します。試合開始前に設定してください。";
+  const started = set.matches.some(mt => [mt.throws, mt.game1, mt.game2, mt.game3].some(a => Array.isArray(a) && a.length));
+  const blocks = set.blocks && set.blocks.length ? set.blocks : [{name:"ブロック1", players:set.sides.map(s=>s.name)}];
+  const count = Math.max(1, Math.min(3, pendingSoloBlockCount || parseInt(set.blockCount,10) || blocks.length || 1));
+  $("solo-block-count").value = String(count);
+  const assigned = new Map();
+  if(set.blockCount === count) blocks.forEach((b,i)=>(b.players||[]).forEach(name=>assigned.set(name, Math.min(count,i+1))));
+  // 初回は人数差が最大1人になるように自動配分
+  set.sides.forEach((s,i)=>{ if(!assigned.has(s.name)) assigned.set(s.name, (i % count)+1); });
+  $("solo-block-assignments").innerHTML = `<table><tr><th>参加者</th><th>ブロック</th></tr>` + set.sides.map(s=>`<tr><td>${esc(s.name)}</td><td><select class="solo-block-select" data-player="${esc(s.name)}" ${started?"disabled":""}>${Array.from({length:count},(_,i)=>`<option value="${i+1}" ${assigned.get(s.name)===i+1?"selected":""}>ブロック${i+1}</option>`).join("")}</select></td></tr>`).join("") + `</table>`;
+  $("solo-block-count").disabled = started;
+  $("save-solo-blocks").disabled = started;
+  $("solo-block-status").textContent = started ? "スコア入力後はブロックを変更できません。" : "未設定の参加者は均等に振り分けられます。";
+}
+
+$("solo-block-count").onchange = () => { pendingSoloBlockCount = parseInt($("solo-block-count").value,10) || 1; if(data && data.sets[cur]) renderSoloBlockConfig(data.sets[cur]); };
+$("save-solo-blocks").onclick = async () => {
+  const set = data && data.sets[cur]; if(!set || (set.type !== "solo" && set.type !== "league")) return;
+  if(set.matches.some(mt => [mt.throws,mt.game1,mt.game2,mt.game3].some(a=>Array.isArray(a)&&a.length))) { alert("スコア入力後は変更できません"); return; }
+  const count = parseInt($("solo-block-count").value,10);
+  const groups = Array.from({length:count},(_,i)=>({name:`ブロック${i+1}`,players:[]}));
+  document.querySelectorAll(".solo-block-select").forEach(sel=>groups[parseInt(sel.value,10)-1].players.push(sel.dataset.player));
+  if(set.type === "league" && groups.some(b=>b.players.length<2)){ alert("リーグ戦では各ブロックに2人以上を割り当ててください。"); return; }
+  if(set.type === "solo" && groups.some(b=>b.players.length<2)){ alert("個人フリーでは各ブロックに2人以上を割り当ててください。"); return; }
+  const byName = new Map(set.sides.map(s=>[s.name,s]));
+  const matches=[];
+  if(set.type === "league") {
+    const leagueMode = set.games > 1 ? "match_total" : "game1";
+    groups.forEach((block,blockIndex)=>{
+      const sides=block.players.map(name=>byName.get(name));
+      const pairs=shuffleArray(sides.flatMap((side,i)=>sides.slice(i+1).map(opponent=>[side,opponent])));
+      pairs.forEach(([a,b],i)=>{
+        const match={sides:[a,b],start:0,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:leagueMode,blockName:block.name,round:i+1,blockOrder:blockIndex};
+        if(leagueMode === "match_total") match.gamesToPlay=Math.max(2,parseInt(set.games,10)||2);
+        matches.push(match);
+      });
+    });
+    // 各ブロックの第1試合、第2試合…を同じラウンドごとに交互に配置
+    matches.sort((a,b)=>a.round-b.round || a.blockOrder-b.blockOrder);
+    matches.forEach(match=>delete match.blockOrder);
+  } else {
+    const totalGames = Math.max(1,parseInt(set.games,10)||1);
+    const roundsByBlock = groups.map(block=>set.mode === "first" ? 1 : totalGames);
+    const maxRounds = Math.max(...roundsByBlock);
+    for(let round=0;round<maxRounds;round++) for(let blockIndex=0;blockIndex<groups.length;blockIndex++){
+      const block=groups[blockIndex];
+      if(round>=roundsByBlock[blockIndex]) continue;
+      const sides=block.players.map(name=>byName.get(name));
+      matches.push({sides,start:round%sides.length,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:"game1",blockName:block.name,round:round+1});
+    }
+  }
+  await mutate(d=>{const target=findSet(d,set.id); if(!target)return false; target.blocks=groups; target.blockCount=count; target.matches=matches; target.activeMatchIndex=0;});
+  pendingSoloBlockCount = null;
+};
+
+function getTournamentMatchLabel(match,index){
+  const labels={m1:"1回戦①",m2:"1回戦②",m3:"1回戦③",m4:"1回戦④",semi1:"準決勝①",semi2:"準決勝②",loser_round1:"敗者交流戦",loser_round2:"敗者戦",consolation:"交流戦",bronze:"3位決定戦",final:"決勝"};
+  return labels[match.bracket]||`試合${index+1}`;
+}
+function getTournamentSlotLabel(set,target,slot){
+  const winnerSource=set.matches.find(match=>match.nextWin&&match.nextWin.match===target.bracket&&match.nextWin.slot===slot);
+  if(winnerSource)return `勝者（${getTournamentMatchLabel(winnerSource,set.matches.indexOf(winnerSource))}）`;
+  const loserSource=set.matches.find(match=>match.nextLose&&match.nextLose.match===target.bracket&&match.nextLose.slot===slot);
+  if(loserSource)return `敗者（${getTournamentMatchLabel(loserSource,set.matches.indexOf(loserSource))}）`;
+  return "未定";
+}
+
 function renderSet(set){
   if(set.activeMatchIndex === undefined) set.activeMatchIndex = 0;
   const activeIdx = set.activeMatchIndex;
@@ -1512,82 +1662,109 @@ function renderSet(set){
   const matchOver = matchWinnerIdx !== null;
 
   const S = summarize(set);
+  renderSoloBlockConfig(set);
   
   $("setname").textContent=set.name;
   let stageName = `【第${activeIdx+1}試合】`;
   if(set.sides.length === 8) {
-    const names = {m1:"1回戦",m2:"1回戦",m3:"1回戦",m4:"1回戦",loser_round1:"敗者戦",loser_round2:"敗者戦",semi1:"準決勝",semi2:"準決勝",loser_final:"5位決定戦",bronze:"3位決定戦",final:"決勝戦"};
+    const names = {m1:"1回戦",m2:"1回戦",m3:"1回戦",m4:"1回戦",loser_round1:"敗者戦",loser_round2:"敗者戦",semi1:"準決勝",semi2:"準決勝",bronze:"3位決定戦",final:"決勝戦"};
     stageName = `【${names[m.bracket] || `第${activeIdx+1}試合`}】`;
   }
   if (set.sides.length === 6) {
     if (m.bracket === "m1" || m.bracket === "m2") stageName = "【1回戦】";
     else if (m.bracket === "loser_round1") stageName = "【1回戦敗退者同士の試合】";
     else if (m.bracket === "semi1" || m.bracket === "semi2") stageName = "【準決勝】";
-    else if (m.bracket === "loser_final") stageName = "【3位決定戦】";
+    else if (m.bracket === "bronze") stageName = "【3位決定戦】";
     else if (m.bracket === "final") stageName = "【決勝戦】";
   } else if (set.sides.length === 5) {
-    if (m.bracket === "m1" || m.bracket === "m2") stageName = "【1回戦】";
-    else if (m.bracket === "loser_round1") stageName = "【1回戦敗退者同士の試合】";
+    if (m.bracket === "m1") stageName = "【1回戦】";
+    else if (m.bracket === "consolation") stageName = "【交流戦（予選敗者・3位決定戦敗者）】";
     else if (m.bracket === "semi1" || m.bracket === "semi2") stageName = "【準決勝】";
+    else if (m.bracket === "bronze") stageName = "【3位決定戦】";
     else if (m.bracket === "final") stageName = "【決勝戦】";
   } else if (set.sides.length === 7) {
     if (m.bracket === "m1" || m.bracket === "m2" || m.bracket === "m3") stageName = "【1回戦】";
-    else if (m.bracket === "loser_round1") stageName = "【敗者戦（3チーム3つ巴）】";
+    else if (m.bracket === "loser_round1") stageName = "【敗者交流戦（3人戦・順位決定なし）】";
     else if (m.bracket === "semi1" || m.bracket === "semi2") stageName = "【準決勝】";
-    else if (m.bracket === "loser_final") stageName = "【3位決定戦】";
+    else if (m.bracket === "bronze") stageName = "【3位決定戦】";
     else if (m.bracket === "final") stageName = "【決勝戦】";
   } else if (set.sides.length === 4) {
-    if (m.bracket === "loser") stageName = "【3位決定戦（敗者戦）】";
-    else if (m.bracket === "final") stageName = "【決勝戦（1位決定戦）】";
-    else stageName = "【1回戦】";
+    if (m.bracket === "semi1" || m.bracket === "semi2") stageName = "【準決勝】";
+    else if (m.bracket === "bronze") stageName = "【3位決定戦】";
+    else if (m.bracket === "final") stageName = "【決勝戦】";
   }
 
-  const totalGames = m.tournamentMode === "match2_total" ? 2 : (parseInt(m.gamesToPlay, 10) || 2);
+  const totalGames = m.tournamentMode === "match2_total" ? 2 : (parseInt(m.gamesToPlay, 10) || 1);
   const modeLabel = (m.tournamentMode === "match_total" || m.tournamentMode === "match2_total") ? ` (${totalGames}試合合計戦 ${gIdx < totalGames ? `ゲーム${gIdx+1}/${totalGames}` : "同点決着ゲーム"})` : m.tournamentMode === "game2_wins" ? ` (最大3ゲーム・2本先取)` : ` (1本勝負)`;
-  $("setinfo").textContent=set.type==="tournament" ? `トーナメント戦 ${stageName}${modeLabel}` : set.type==="league" ? `総当たりリーグ戦 【第${activeIdx+1}試合】${m.tournamentMode === "match_total" ? modeLabel : ""}` : `第${activeIdx+1}試合 / 全${set.matches.length}試合`;
+  $("setinfo").textContent=set.type==="tournament" ? `トーナメント戦 ${stageName}${modeLabel}` : set.type==="league" ? `${m.blockName ? `${m.blockName}・` : ""}${m.leaguePlayoff ? "優勝決定プレーオフ" : `総当たりリーグ戦 【第${activeIdx+1}試合】`}${m.tournamentMode === "match_total" ? modeLabel : ""}` : set.type==="solo" ? `${m.blockName || "ブロック1"}・第${m.round || activeIdx+1}試合 / 全${set.matches.length}試合` : `第${activeIdx+1}試合 / 全${set.matches.length}試合`;
   $("final").innerHTML=S.over ? `<div class="banner">🏆 ${S.winnerNames && S.winnerNames.length ? `セット優勝：${S.winnerNames.map(name => esc(name)).join("・")}` : "セットの全日程が終了しました！"}</div>`:"";
   
   if(set.type === "tournament" || set.type === "league") {
     $("tournament-overview").classList.remove("hide");
+    $("tournament-overview-title").textContent = set.type === "league" ? "📋 リーグ戦 / 対戦スケジュール" : "🌳 トーナメント表 / 対戦スケジュール";
     let treeHtml = `<ul>` + set.matches.map((mt, idx) => {
       const mw = getMatchWinner(mt, set.missRule, set.overRule, set.type === "team");
       const isDone = mw !== null;
       const mSides = mt.customSides || mt.sides;
-      const winnerName = isDone ? mSides[mw].name : "（前の試合の終了待ち）";
+      const matchStarted=[mt.throws,mt.game1,mt.game2,mt.game3].some(list=>Array.isArray(list)&&list.length>0);
+      const winnerName = isDone ? mSides[mw].name : (matchStarted||set.type === "league" ? "進行中" : "未実施");
       let bLabel = `【試合${idx+1}】`;
-      if(set.sides.length === 8) {
-        const names = {m1:"1回戦",m2:"1回戦",m3:"1回戦",m4:"1回戦",loser_round1:"敗者戦",loser_round2:"敗者戦",semi1:"準決勝",semi2:"準決勝",loser_final:"5位決定戦",bronze:"3位決定戦",final:"決勝戦"};
+      if(set.type === "league") {
+        bLabel = `【${mt.blockName ? `${mt.blockName}・` : ""}第${mt.round || idx+1}試合】`;
+      } else if(set.sides.length === 8) {
+        const names = {m1:"1回戦",m2:"1回戦",m3:"1回戦",m4:"1回戦",loser_round1:"敗者戦",loser_round2:"敗者戦",semi1:"準決勝",semi2:"準決勝",bronze:"3位決定戦",final:"決勝戦"};
         bLabel = `【${names[mt.bracket] || `試合${idx+1}`}】`;
       }
-      if (set.sides.length === 6) {
+      if (set.type !== "league" && set.sides.length === 6) {
         if (mt.bracket === "m1" || mt.bracket === "m2") bLabel = "【1回戦】";
         else if (mt.bracket === "loser_round1") bLabel = "【初戦敗退者戦】";
         else if (mt.bracket === "semi1" || mt.bracket === "semi2") bLabel = "【準決勝】";
-        else if (mt.bracket === "loser_final") bLabel = "【3位決定戦】";
+        else if (mt.bracket === "bronze") bLabel = "【3位決定戦】";
         else if (mt.bracket === "final") bLabel = "【決勝戦】";
       } else if (set.sides.length === 5) {
-        if (mt.bracket === "m1" || mt.bracket === "m2") bLabel = "【1回戦】";
-        else if (mt.bracket === "loser_round1") bLabel = "【初戦敗退者戦】";
+        if (mt.bracket === "m1") bLabel = "【1回戦】";
+        else if (mt.bracket === "consolation") bLabel = "【交流戦（予選敗者・3位決定戦敗者）】";
         else if (mt.bracket === "semi1" || mt.bracket === "semi2") bLabel = "【準決勝】";
+        else if (mt.bracket === "bronze") bLabel = "【3位決定戦】";
         else if (mt.bracket === "final") bLabel = "【決勝戦】";
       } else if (set.sides.length === 7) {
         if (mt.bracket === "m1" || mt.bracket === "m2" || mt.bracket === "m3") bLabel = "【1回戦】";
-        else if (mt.bracket === "loser_round1") bLabel = "【敗者戦（3つ巴）】";
+        else if (mt.bracket === "loser_round1") bLabel = "【敗者交流戦（3人戦・順位決定なし）】";
         else if (mt.bracket === "semi1" || mt.bracket === "semi2") bLabel = "【準決勝】";
-        else if (mt.bracket === "loser_final") bLabel = "【3位決定戦】";
+        else if (mt.bracket === "bronze") bLabel = "【3位決定戦】";
         else if (mt.bracket === "final") bLabel = "【決勝戦】";
       } else if (set.sides.length === 4) {
-        if (mt.bracket === "loser") bLabel = "【3位決定戦】";
+        if (mt.bracket === "semi1" || mt.bracket === "semi2") bLabel = "【準決勝】";
+        else if (mt.bracket === "bronze") bLabel = "【3位決定戦】";
         else if (mt.bracket === "final") bLabel = "【決勝戦】";
-        else bLabel = "【1回戦】";
-      } else if (set.type === "league") {
-        bLabel = `【対戦${idx+1}】`;
       }
+      if(mt.leaguePlayoff) bLabel = "【優勝決定プレーオフ】";
       const currentMark = (idx === activeIdx && !S.over) ? " 👈 現在の対戦" : "";
-      const vsString = mSides.map(s => s.name).join(" vs ");
-      return `<li><b>${bLabel}:</b> ${esc(vsString)} ➔ 勝者: <b>${esc(winnerName)}</b> ${currentMark}</li>`;
+      const vsString = mSides.map((side,slot)=>side?side.name:(set.type==="tournament"?getTournamentSlotLabel(set,mt,slot):"未定")).join(" vs ");
+      const scoreText = set.type === "league" ? getMatchScoreHTML(mt,set) : "";
+      return `<li><b>${bLabel}:</b> ${esc(vsString)}${scoreText !== "-" && scoreText ? ` <span class="pl">(${scoreText})</span>` : ""} ➔ 結果: <b>${esc(winnerName)}</b> ${currentMark}</li>`;
     }).join("") + `</ul>`;
+    if(set.type==="tournament") {
+      const finalMatch=set.matches.find(match=>match.bracket==="final"),bronzeMatch=set.matches.find(match=>match.bracket==="bronze");
+      const finalWinner=finalMatch?getMatchWinner(finalMatch,set.missRule,set.overRule):null;
+      const bronzeWinner=bronzeMatch?getMatchWinner(bronzeMatch,set.missRule,set.overRule):null;
+      if(finalWinner!==null&&bronzeWinner!==null) {
+        const finalSides=finalMatch.customSides||finalMatch.sides,bronzeSides=bronzeMatch.customSides||bronzeMatch.sides;
+        const podiumRows=[["優勝",finalSides[finalWinner].name],["準優勝",finalSides[finalWinner===0?1:0].name],["3位",bronzeSides[bronzeWinner].name]];
+        const podiumNames=new Set(podiumRows.map(row=>row[1]));
+        const otherNames=set.sides.map(side=>side.name).filter(name=>!podiumNames.has(name));
+        if(otherNames.length)podiumRows.push(["その他",otherNames.join("・")]);
+        treeHtml+=`<h4>大会順位</h4><table><tr><th>区分</th><th>参加者</th></tr>`+podiumRows.map(row=>`<tr><td>${esc(row[0])}</td><td>${esc(row[1])}</td></tr>`).join("")+`</table>`;
+      }
+    }
+    if(set.type === "league") {
+      const standings=getLeagueStandings(set);
+      treeHtml += standings.map(block=>`<h4>${esc(block.name)}順位</h4><table><tr><th>順位</th><th>名前</th><th>勝</th><th>総得点</th><th>失点</th><th>得失点</th><th>直接対決</th></tr>`+
+        block.standings.map(row=>`<tr><td>${row.rank}</td><td>${esc(row.name)}</td><td>${row.wins}</td><td>${row.pointsFor}</td><td>${row.pointsAgainst}</td><td>${row.differential}</td><td>${row.headToHeadWins}</td></tr>`).join("")+`</table>`).join("");
+    }
     $("tournament-tree-content").innerHTML = treeHtml;
+    $("tournament-tree-content").style.display = isScheduleHidden ? "none" : "block";
+    $("toggle-tournament-overview").textContent = isScheduleHidden ? "展開する" : "折りたたむ";
   } else {
     $("tournament-overview").classList.add("hide");
   }
@@ -1621,7 +1798,7 @@ function renderSet(set){
     const pl=s.players.map((p,j)=>{
       const q=stSide.players[j];
       const historyStr = q.history.length > 0 ? ` [${q.history.join(",")}]` : "";
-      return `<span class="${set.type!=="team"&&q.out?"out":""}">${esc(p)}${historyStr}</span>`;
+      return `<span class="${set.type!=="team"&&q.out?"out":""}">${esc(p)}${historyStr}${set.type!=="team"?` <span class="miss-streak">0点連続 ${q.miss}回</span>`:""}</span>`;
     }).join(" ");
     const key = scoreKey(s);
     let previousScore = previousScores.has(key) ? previousScores.get(key) : null;
@@ -1632,7 +1809,8 @@ function renderSet(set){
     const previous = previousScore === null ? "-" : `${previousScore}点`;
     const previousLabel = gIdx > 0 ? "前のゲーム" : "前の試合";
     const total = totalScores.get(key) || 0;
-    return `<div class="card ${cls}"><div><b>${esc(s.name)}</b><div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>今回のゲーム</small><small>${previousLabel} ${previous}</small><small>合計 ${total}点</small></div></div>`;
+    const teamZeroStreak = set.type === "team" ? `<div class="miss-streak">0点連続 ${stSide.teamMiss}回</div>` : "";
+    return `<div class="card ${cls}"><div><b>${esc(s.name)}</b>${teamZeroStreak}<div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>今回のゲーム</small><small>${previousLabel} ${previous}</small><small>合計 ${total}点</small></div></div>`;
   }).join("");
 
   // 個人戦・トーナメント・リーグでもオーダー/先攻後攻の並び替えパネルを表示する
@@ -1656,10 +1834,13 @@ function renderSet(set){
   resultsHtml += set.matches.map((mt,mi)=>{
     const mSides = mt.customSides || mt.sides;
     const mw = getMatchWinner(mt, set.missRule, set.overRule, set.type === "team");
-    const winnerText = mw !== null ? esc(mSides[mw].name) : "進行中";
-    const vsString = mSides.map(s => s.name).join(" vs ");
+    const matchStarted=[mt.throws,mt.game1,mt.game2,mt.game3].some(list=>Array.isArray(list)&&list.length>0);
+    const winnerText = mt.skipped ? "スキップ" : mw !== null ? esc(mSides[mw]?.name || "未定") : (matchStarted||set.type === "league" ? "進行中" : "未実施");
+    const vsString = mSides.map((side,slot)=>side?side.name:(set.type==="tournament"?getTournamentSlotLabel(set,mt,slot):"未定")).join(" vs ");
+    const startSide=mSides[mt.start];
+    const startText=startSide?startSide.name:(set.type==="tournament"?getTournamentSlotLabel(set,mt,mt.start):"未定");
     const scoreText = getMatchScoreHTML(mt, set);
-    return `<tr><td>${mi+1}</td><td>${esc(mSides[mt.start].name)}</td><td>${esc(vsString)}</td><td>${scoreText}</td><td>${winnerText}</td></tr>`;
+    return `<tr><td>${mi+1}${mt.blockName ? `<br>${esc(mt.blockName)}・第${mt.round}試合` : ""}</td><td>${esc(startText)}</td><td>${esc(vsString)}</td><td>${scoreText}</td><td>${winnerText}</td></tr>`;
   }).join("") + "</table>";
   $("results").innerHTML = resultsHtml;
 
@@ -1674,9 +1855,9 @@ function renderSet(set){
 function renderStats(){
   stopTimer();
   const T=tally(data);
-  $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>試合</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>平均点</th><th>0点</th></tr>"+
-    T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td></tr>`).join("")+"</table>"+
-    "<p class='pl'>「試合」「勝」は決着したゲームごと。平均点は1投あたりの得点です。</p>";
+  $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>試合</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th></tr>"+
+    T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.pts}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td></tr>`).join("")+"</table>"+
+    "<p class='pl'>「試合」「勝」は決着したゲームごと。総得点はこれまでの全投球で獲得した得点の合計、平均点は1投あたりの得点です。</p>";
 
 }
 </script>
