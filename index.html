@@ -195,7 +195,7 @@ td.l,th.l{text-align:left}
 </div>
 <p class="pl" id="order-edit-desc">試合開始前または次の試合へ進む前に、各サイドの並び順（先攻・後攻）やチーム内オーダーを変更できます。</p>
 <div id="next-order-container"></div>
-<p style="margin-top:8px;" id="order-save-area"><button class="sub" id="save-order" style="font-size:14px; padding:6px 12px; background:#2a9d3a;">現在の試合の順番を反映・保存する</button></p>
+<p style="margin-top:8px;" id="order-save-area"><button class="sub" id="save-order" style="font-size:14px; padding:6px 12px; background:#2a9d3a;">順番を保存（次の同じ参加者の試合にも優先）</button></p>
 </div>
 <div id="pad-area">
 <div class="card">
@@ -352,6 +352,35 @@ $("ntype").onchange=()=>{
 };
 $("ngames").addEventListener("change", syncTournamentModeFromGeneralSettings);
 $("ntournament-mode").onchange=()=>{ tournamentModeManuallySet = true; };
+
+function sameSideParticipants(first,second){
+  if(!Array.isArray(first)||!Array.isArray(second)||first.length!==second.length)return false;
+  const firstNames=first.map(side=>side&&side.name).sort(),secondNames=second.map(side=>side&&side.name).sort();
+  return firstNames.every((name,index)=>name===secondNames[index]);
+}
+function canApplyManualOrder(sourceMatch,targetMatch,orderedSides){
+  if(!sameSideParticipants(orderedSides,targetMatch.customSides||targetMatch.sides))return false;
+  return (sourceMatch.blockName||null)===(targetMatch.blockName||null);
+}
+function sameSideOrder(first,second){
+  if(!Array.isArray(first)||!Array.isArray(second)||first.length!==second.length)return false;
+  return first.every((side,index)=>side&&second[index]&&side.name===second[index].name&&JSON.stringify(side.players||[])===JSON.stringify(second[index].players||[]));
+}
+function getOrderSidesFromForm(set,match){
+  const original=match.customSides||match.sides;
+  if(set.type==="team") {
+    const cards=[...document.querySelectorAll(".next-team-card")];
+    if(!cards.length)return original;
+    return cards.map(card=>{
+      const index=parseInt(card.dataset.sideIndex,10),side=original[index];
+      const players=[...card.querySelectorAll(".next-member-item")].map(item=>item.dataset.member);
+      return {name:side.name,players};
+    });
+  }
+  const items=[...document.querySelectorAll(".next-side-item")];
+  if(!items.length)return original;
+  return items.map(item=>({name:item.dataset.sideName,players:JSON.parse(item.dataset.sidePlayers||"[]")}));
+}
 
 function getGameThrows(match, gameIndex) {
   const key = `game${gameIndex + 1}`;
@@ -818,7 +847,7 @@ function renderNextOrderForm(set) {
   const throwsList = getGameThrows(m, currentGameIndex);
   const activeMatchRes = replay(lastMatchSides, throwsList, m.start, set.type==="team", set.missRule, set.overRule);
   const descText = activeMatchRes.winner !== null 
-    ? "次のゲーム（または次の試合）へ進む前に、先攻・後攻の並び順やメンバーの順番を変更できます。" 
+    ? "次の試合へ進む前に並び順を調整して保存すると、同じ参加者の次試合ではこの順番が自動先攻設定より優先されます。" 
     : "現在の試合途中でも、先攻・後攻の入れ替えやメンバーの並び順を自由に変更できます。";
   $("order-edit-desc").textContent = descText;
   
@@ -1255,36 +1284,23 @@ $("next").onclick=()=>{
     alert("このゲームがまだ終了していません。");
     return;
   }
+  const displayedOrder=getOrderSidesFromForm(set,m);
+  const requestedOrder=sameSideOrder(displayedOrder,customSides)?(m.customSides||null):displayedOrder;
   isOrderHidden = false; 
-  proceedToNextStep(null);
+  proceedToNextStep(requestedOrder);
 };
 
-$("save-order").onclick = () => {
+$("save-order").onclick = async () => {
   const set = data.sets[cur];
   const activeIdx = set.activeMatchIndex || 0;
   const m = set.matches[activeIdx] || set.matches[0];
   const origSides = m.customSides || m.sides;
 
-  let newCustomSides = [];
-  if (set.type === "team") {
-    const nextTeamCards = document.querySelectorAll(".next-team-card");
-    nextTeamCards.forEach((card, idx) => {
-      const origIndex = parseInt(card.dataset.sideIndex, 10);
-      const origSide = origSides[origIndex];
-      const memberItems = card.querySelectorAll(".next-member-item");
-      const newPlayers = [...memberItems].map(item => item.dataset.member);
-      newCustomSides.push({name: origSide.name, players: newPlayers});
-    });
-  } else {
-    const sideItems = document.querySelectorAll(".next-side-item");
-    sideItems.forEach(item => {
-      const sName = item.dataset.sideName;
-      const sPlayers = JSON.parse(item.dataset.sidePlayers || "[]");
-      newCustomSides.push({name: sName, players: sPlayers});
-    });
-  }
+  const newCustomSides=getOrderSidesFromForm(set,m);
   
-  mutate(d => {
+  // 先に画面上のデータへ反映し、次へ進む操作ですぐ参照できるようにする
+  m.customSides = newCustomSides;
+  await mutate(d => {
     const s = findSet(d, set.id);
     if(s && s.matches[activeIdx]) {
       s.matches[activeIdx].customSides = newCustomSides;
@@ -1388,6 +1404,7 @@ async function proceedToNextStep(customSides) {
       if(nextIndex<s.matches.length) {
         s.activeMatchIndex=nextIndex;
         const next=s.matches[nextIndex];next.currentGameIndex=0;next.throws=next.game1||[];
+        if(customSides&&canApplyManualOrder(match,next,customSides)) { next.customSides=[...customSides];next.start=0; }
         return;
       }
       const added=[];
@@ -1399,12 +1416,14 @@ async function proceedToNextStep(customSides) {
         if([...winCounts.values()].some(count=>count>=target))return;
         const maximum=(target-1)*Math.max(1,names.length)+1;
         if(blockMatches.length>=maximum)return;
-        const sides=s.type==="team"?s.sides:names.map(name=>s.sides.find(side=>side.name===name)).filter(Boolean);
-        if(sides.length<2)return;
+        const defaultSides=s.type==="team"?s.sides:names.map(name=>s.sides.find(side=>side.name===name)).filter(Boolean);
+        if(defaultSides.length<2)return;
+        const manualOrderApplies=customSides&&(block.name||null)===(match.blockName||null)&&sameSideParticipants(customSides,defaultSides);
+        const sides=manualOrderApplies?[...customSides]:defaultSides;
         const round=blockMatches.length+1;
         const previous=blockMatches[blockMatches.length-1];
         let start=0;
-        if(previous) {
+        if(previous&&!manualOrderApplies) {
           if(s.firstRule==="loser") {
             const previousSides=previous.customSides||previous.sides;
             const previousResult=replay(previousSides,getGameThrows(previous,0),previous.start,s.type==="team",s.missRule,s.overRule);
@@ -1413,7 +1432,7 @@ async function proceedToNextStep(customSides) {
           } else if(s.firstRule==="rotate") start=(previous.start+1)%sides.length;
           else start=0;
         }
-        added.push({sides,start,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:"game1",...(block.name?{blockName:block.name,round}:{})});
+        added.push({sides,...(manualOrderApplies?{customSides:[...customSides]}:{}),start,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:"game1",...(block.name?{blockName:block.name,round}:{})});
       });
       if(added.length){s.matches.push(...added);s.activeMatchIndex=s.matches.length-added.length;}
       return;
@@ -1466,7 +1485,10 @@ async function proceedToNextStep(customSides) {
       nextM.game3 = [];
       nextM.currentGameIndex = 0;
       nextM.throws = nextM.game1;
-      if(customSides) nextM.customSides = customSides;
+      if(customSides&&canApplyManualOrder(match,nextM,customSides)) {
+        nextM.customSides=[...customSides];
+        nextM.start=0;
+      }
     } else {
       // 予定試合の末尾に達した時は、先取り以外の方式で自動追加しない
       return;
