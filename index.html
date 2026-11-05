@@ -1251,12 +1251,18 @@ function enter(code){
 
 $("restrict-my-turn").onchange = () => { render(); };
 
+const MAX_ROOM_SERIALIZED_BYTES=800*1024;
 async function mutate(fn){
+  let sizeLimitExceeded=false;
   await runTransaction(db,async tx=>{
     const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
     if(fn(d)===false)return;
+    const serialized=JSON.stringify(d);
+    const byteLength=new TextEncoder().encode(serialized).length;
+    if(byteLength>MAX_ROOM_SERIALIZED_BYTES){sizeLimitExceeded=true;return;}
     tx.update(ref,{players:d.players,sets:d.sets});
   });
+  if(sizeLimitExceeded)alert("この部屋の保存データが大きくなったため、変更を保存できません。新しい部屋を作成して続けてください。");
 }
 
 const findSet=(d,id)=>d.sets.find(x=>x.id===id);
@@ -1480,16 +1486,23 @@ async function add(pts){
   const set=data.sets[cur],sid=set.id,activeIdx=set.activeMatchIndex || 0;
   const m = set.matches[activeIdx];
   const gIdx = m.currentGameIndex || 0;
+  const expectedThrowCount=getGameThrows(m,gIdx).length;
+  let staleInput=false;
 
   await mutate(d=>{
     const s=findSet(d,sid);
     if(!s||!s.matches[activeIdx])return false;
+    if((s.activeMatchIndex||0)!==activeIdx){staleInput=true;return false;}
     const match = s.matches[activeIdx];
+    if((match.currentGameIndex||0)!==gIdx){staleInput=true;return false;}
     const gameKey = `game${gIdx + 1}`;
     if(!Array.isArray(match[gameKey])) match[gameKey] = [];
+    if(match[gameKey].length!==expectedThrowCount){staleInput=true;return false;}
+    if(replay(match.customSides||match.sides,match[gameKey],getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule).winner!==null){staleInput=true;return false;}
     match[gameKey].push(pts);
     match.throws = match[gameKey];
   });
+  if(staleInput)alert("別の端末で試合が更新されました。最新の画面に切り替わってから入力してください。");
 }
 
 $("pad").innerHTML=[...Array(13).keys()].map(i=>`<button data-p="${i}">${i}</button>`).join("");
