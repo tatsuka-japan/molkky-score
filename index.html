@@ -16,6 +16,14 @@ h1{font-size:20px;margin:4px 0}
 .pl{font-size:13px;color:#555}
 .score-player-name{display:inline-block;font-size:21px;font-weight:700;line-height:1.4;margin:3px 4px 3px 0}
 .score-player-icon{font-size:24px;vertical-align:-1px;margin-right:2px}
+.side{gap:12px}
+.side>.score-side-details{flex:1 1 0;min-width:0;overflow-wrap:anywhere}
+.side>.score{flex:0 0 auto}
+.score-player-name{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.score-throw-history{white-space:normal;overflow-wrap:anywhere}
+.selected-throw{color:#b00020;background:#fff0a6;outline:2px solid #d44;border-radius:4px;animation:throw-pulse 1s infinite alternate}
+@keyframes throw-pulse{to{background:#ffd0d0}}
+@media(prefers-reduced-motion:reduce){.selected-throw{animation:none}}
 .out{text-decoration:line-through;color:#c33}
 button{font-size:18px;padding:10px;border:0;border-radius:10px;background:#3b6ea8;color:#fff}
 button.sub{background:#888;font-size:15px}
@@ -57,7 +65,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.32</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.33</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -170,7 +178,7 @@ td.l,th.l{text-align:left}
 <label id="second-game-rule-label">2試合目以降の先攻 <select id="nfirst">
 <option value="rotate">順番に交代する</option>
 <option value="loser" selected>前の試合で点が低かったサイド</option>
-<option value="same">いつも同じサイド（先頭）</option>
+<option value="same">いつも同じサイド（初戦の先攻）</option>
 </select></label>
 </div>
 <p><button id="mkset">セットを作る</button> <button class="sub" id="copyset">前のセットと同じ設定で作る</button></p>
@@ -220,6 +228,7 @@ td.l,th.l{text-align:left}
 <div class="grid" id="pad"></div>
 <p><button class="go hide" id="next">次の対戦へ進む</button></p>
 <p><button class="sub" id="undo">1つ戻す</button>
+<button class="sub" id="return-live">最新に戻る</button><span id="edit-throw-status" role="status"></span>
 <button class="sub" id="delset">このセットを削除</button></p>
 </div>
 </div>
@@ -321,6 +330,131 @@ let isOrderHidden = false;
 let isScheduleHidden = false;
 let isBlockConfigHidden = false;
 let tournamentModeManuallySet = false;
+let selectedThrow=null;
+let currentPlayer=localStorage.me||"";
+let playerSessionBusy=false;
+function hasPlayerSession(d){
+  return isAdmin()||!!currentPlayer&&(d?.playerSessions||[]).some(item=>item.id===inputSessionId&&item.name===currentPlayer&&item.expires>Date.now());
+}
+async function claimPlayerSession(release=false){
+  if(!room||playerSessionBusy)return false;
+  playerSessionBusy=true;
+  const name=currentPlayer;
+  try {
+    return await runTransaction(db,async tx=>{
+      const ref=doc(db,"rooms",room),snap=await tx.get(ref);
+      if(!snap.exists())return false;
+      const sessions=(snap.data().playerSessions||[]).filter(item=>item.expires>Date.now()&&item.id!==inputSessionId);
+      if(!release&&name&&!isAdmin()){
+        if(sessions.some(item=>item.name===name))return false;
+        sessions.push({id:inputSessionId,name,expires:Date.now()+INPUT_LEASE_MS});
+      }
+      tx.update(ref,{playerSessions:sessions});return true;
+    });
+  } finally {playerSessionBusy=false;}
+}
+async function activatePlayer(){
+  try {
+    if(!await claimPlayerSession()){
+      currentPlayer="";alert("この名前は別の端末・タブで使用中です。観戦に切り替えました。");
+    } else localStorage.me=currentPlayer;
+  } catch(error){currentPlayer="";alert("利用端末を確認できませんでした。通信状態を確認して選び直してください。");}
+  if(data)render();
+}
+let orderFormKey="";
+function throwOwners(set,match,list){
+  const sides=match.customSides||match.sides,g=match.currentGameIndex||0;
+  let before=replay(sides,[],getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule);
+  return list.map((_,index)=>{
+    const after=replay(sides,list.slice(0,index+1),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule);
+    let owner=null;
+    after.st.forEach((side,i)=>side.players.forEach((p,j)=>{
+      if(p.n>before.st[i].players[j].n)owner=JSON.stringify([sides[i].name,sides[i].players[j]]);
+    }));
+    before=after;return owner;
+  });
+}
+function adminAuthKey(){return `molkky:admin-auth:v1:${room}`;}
+function isAdmin(){
+  return !!room&&currentPlayer==="佐藤"&&localStorage.getItem(adminAuthKey())==="verified";
+}
+function authenticateAdminSelection(){
+  if(!room||currentPlayer!=="佐藤"||isAdmin())return;
+  const pin=prompt("佐藤（管理者）のPINコードを入力してください。このブラウザーではルームごとに初回のみ必要です。");
+  if(pin==="0918")localStorage.setItem(adminAuthKey(),"verified");
+  else {
+    currentPlayer="";
+    if(pin!==null)alert("PINコードが違います。観戦に切り替えました。");
+  }
+}
+function correctionAllowed(d,set,match,index){
+  const me=currentPlayer||"";
+  if(!me)return false;
+  if(!hasPlayerSession(d))return false;
+  if(isAdmin()||hasInputLease(d))return true;
+  const sides=match.customSides||match.sides,g=match.currentGameIndex||0;
+  const list=getGameThrows(match,g);
+  const before=replay(sides,list.slice(0,index),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule);
+  const after=replay(sides,list.slice(0,index+1),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule);
+  return sides.some((side,i)=>side.players.includes(me)&&after.st[i].players.some((p,j)=>p.n>before.st[i].players[j].n));
+}
+async function correctThrow(points){
+  const selection=selectedThrow;
+  if(!selection)return;
+  let saved=false;
+  await mutate(d=>{
+    const set=findSet(d,selection.sid),match=set?.matches[selection.mi];
+    if(!match||(set.activeMatchIndex||0)!==selection.mi||(match.currentGameIndex||0)!==selection.gi)return false;
+    const list=getGameThrows(match,selection.gi);
+    if(JSON.stringify(list)!==selection.snapshot){alert("記録が更新されました。選び直してください。");return false;}
+    if(!correctionAllowed(d,set,match,selection.index)){alert("この投球を修正する権限がありません。");return false;}
+    const changed=[...list];changed[selection.index]=points;
+    const beforeOwners=throwOwners(set,match,list),afterOwners=throwOwners(set,match,changed);
+    if(beforeOwners.some((owner,i)=>owner!==afterOwners[i])){
+      alert("この変更では失格・休み・勝利の状態が変わり、後続の投球者と矛盾するため保存できません。");return false;
+    }
+    // 後続記録が勝利確定後の投球になる変更は保存しない。
+    if(changed.length>selection.index+1&&replay(match.customSides||match.sides,changed.slice(0,-1),getGameStart(match,selection.gi),isTeamSet(set.type),set.missRule,set.overRule).winner!==null){alert("この変更では途中でゲームが終了し、後続の投球と矛盾します。");return false;}
+    match[`game${selection.gi+1}`]=changed;match.throws=changed;saved=true;
+  });
+  if(saved)selectedThrow=null;
+  render();
+}
+const inputSessionId=crypto.randomUUID();
+const INPUT_LEASE_MS=90000;
+let inputLeaseBusy=false;
+function activeInputLeases(d){
+  return (Array.isArray(d?.inputLeases)?d.inputLeases:[]).filter(item=>item&&item.expires>Date.now());
+}
+function hasInputLease(d){
+  return !!currentPlayer&&activeInputLeases(d).some(item=>item.id===inputSessionId&&item.name===currentPlayer);
+}
+async function changeInputLease(acquire){
+  if(!room||inputLeaseBusy)return false;
+  inputLeaseBusy=true;
+  try {
+    return await runTransaction(db,async tx=>{
+      const ref=doc(db,"rooms",room),snap=await tx.get(ref);
+      if(!snap.exists())return false;
+      const leases=activeInputLeases(snap.data()).filter(item=>item.id!==inputSessionId);
+      if(acquire){
+        const name=currentPlayer||"";
+        if(!name||!hasPlayerSession(snap.data())||leases.length>=2)return false;
+        leases.push({id:inputSessionId,name,expires:Date.now()+INPUT_LEASE_MS});
+      }
+      tx.update(ref,{inputLeases:leases});
+      return true;
+    });
+  } finally {inputLeaseBusy=false;}
+}
+setInterval(async()=>{
+  if(!room||!data)return;
+  try {
+    if(currentPlayer&&!isAdmin())await claimPlayerSession();
+    if(hasInputLease(data))await changeInputLease(true);
+  } catch(error){console.warn("入力枠の更新に失敗",error);}
+  if(data)render();
+},25000);
 let homeMembersList = ["加藤", "木下", "佐藤", "千田", "成澤", "林", "広田", "前澤"];
 
 function renderHomeMembers() {
@@ -400,11 +534,12 @@ function canApplyManualOrder(sourceMatch,targetMatch,orderedSides){
 }
 function getNextFirstSideIndex(set,previousMatch,nextSides){
   if(!Array.isArray(nextSides)||!nextSides.length)return 0;
-  if(set.firstRule==="same")return 0;
+
   const previousSides=previousMatch.customSides||previousMatch.sides;
   const previousStart=getGameStart(previousMatch,0);
   const previousFirstName=previousSides[previousStart]?.name;
   const previousFirstInNext=nextSides.findIndex(side=>side&&side.name===previousFirstName);
+  if(set.firstRule==="same")return previousFirstInNext>=0?previousFirstInNext:0;
   const rotateIndex=previousFirstInNext>=0?(previousFirstInNext+1)%nextSides.length:(previousStart+1)%nextSides.length;
   if(set.firstRule==="rotate")return rotateIndex;
   if(set.firstRule==="loser"){
@@ -537,11 +672,12 @@ function getMatchScoreHTML(match, set) {
 }
 
 function isMyTurn(){
-  const me = localStorage.me || "";
-  if(me === "佐藤") return true;
-  if(!$("restrict-my-turn").checked) return true;
-  if(!me) return true;
-  if(cur < 0 || !data || !data.sets[cur]) return true;
+  const me = currentPlayer || "";
+  if(!me)return false;
+  if(!hasPlayerSession(data))return false;
+  if(isAdmin())return true;
+  if(hasInputLease(data))return true;
+  if(cur < 0 || !data || !data.sets[cur]) return false;
   const set = data.sets[cur];
   const activeIdx = set.activeMatchIndex || 0;
   const m = set.matches[activeIdx] || set.matches[0];
@@ -835,10 +971,7 @@ function summarize(set){
       if(set.mode === "first") {
         const reached = [...wins].filter(([,count])=>count>=target).map(([name])=>name);
         if(reached.length) winningNames.push(reached[0]);
-        else if(blockDone) {
-          const maxWins=Math.max(...wins.values());
-          winningNames.push(...[...wins].filter(([,count])=>count===maxWins).map(([name])=>name));
-        } else allBlocksDone=false;
+        else allBlocksDone=false;
       } else {
         if(blockMatches.some(match=>!match.skipped && getMatchWinner(match,missRule,overRule,isTeamSet(type))===null)) blockDone=false;
         if(blockDone) {
@@ -1125,6 +1258,11 @@ window.sortSolo = (btn, direction) => {
 };
 
 function renderNextOrderForm(set) {
+  const current=set.matches[set.activeMatchIndex||0];
+  const key=JSON.stringify([set.id,set.activeMatchIndex||0,current.currentGameIndex||0,current.customSides||current.sides,getGameThrows(current,current.currentGameIndex||0)]);
+  $("match-order-card").style.display=isOrderHidden?"none":"block";
+  if(key===orderFormKey)return;
+  orderFormKey=key;
   const activeIdx = set.activeMatchIndex || 0;
   const m = set.matches[activeIdx] || set.matches[0];
   const lastMatchSides = m.customSides || m.sides;
@@ -1268,7 +1406,7 @@ $("join").onclick=async()=>{
   enter(c);
 };
 
-$("leave").onclick=()=>{if(unsub)unsub();location.hash="";location.reload();};
+$("leave").onclick=async()=>{try{await changeInputLease(false);await claimPlayerSession(true);}catch(error){console.warn(error);}if(unsub)unsub();location.hash="";location.reload();};
 if(location.hash.length>1)enter(location.hash.slice(1));
 
 function enter(code){
@@ -1277,7 +1415,7 @@ function enter(code){
   unsub=onSnapshot(doc(db,"rooms",code),s=>{
     const d=s.exists()?s.data():null;
     if(!d||!Array.isArray(d.sets)){alert("部屋が見つかりません");$("leave").onclick();return;}
-    if(firstSnap){firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";}
+    if(firstSnap){firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";queueMicrotask(()=>activatePlayer());}
     else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderHidden=false;}
     if(cur>=d.sets.length)cur=d.sets.length-1;
     if(cur<0&&view==="set")view="new";
@@ -1285,13 +1423,22 @@ function enter(code){
   });
 }
 
-$("restrict-my-turn").onchange = () => { render(); };
+$("restrict-my-turn").onchange = async () => {
+  const acquire=!$("restrict-my-turn").checked;
+  $("restrict-my-turn").disabled=true;
+  try {
+    if(!await changeInputLease(acquire)&&acquire)alert("入力制限を解除できるのは同じ部屋で同時に2人までです。");
+  } catch(error){alert("入力制限の変更を保存できませんでした。通信状態を確認してください。");}
+  render();
+};
 
 const MAX_ROOM_SERIALIZED_BYTES=800*1024;
 async function mutate(fn){
+  if(!currentPlayer){alert("観戦中は変更できません。");return;}
   let sizeLimitExceeded=false;
   await runTransaction(db,async tx=>{
     const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
+    if(!hasPlayerSession(d)){alert("この名前の利用権限がありません。名前を選び直してください。");return;}
     if(fn(d)===false)return;
     const serialized=JSON.stringify(d);
     const byteLength=new TextEncoder().encode(serialized).length;
@@ -1327,7 +1474,7 @@ async function createSet(set){
     let matches = [];
     const configuredGames = Math.max(1, parseInt(set.games,10)||3);
     // 先取り方式は最初の1試合だけ作り、必要に応じて次ラウンドを追加する
-    const totalGames = (isTeamSet(set.type) || set.type === "solo") && set.mode === "first" ? 1 : configuredGames;
+    const totalGames = (set.type === "team" || set.type === "solo") && set.mode === "first" ? 1 : configuredGames;
     
     if(isTournamentSet(set.type)){
       if(set.sides.length < 3 || set.sides.length > 8) {
@@ -1520,7 +1667,13 @@ $("addbtn").onclick=async()=>{
   $("addname").value="";
 };
 
-$("me").onchange=()=>{localStorage.me=$("me").value;render();};
+$("me").onchange=async()=>{
+  currentPlayer=$("me").value;
+  authenticateAdminSelection();
+  await activatePlayer();
+  render();
+  try{await changeInputLease(false);}catch(error){console.warn(error);}
+};
 
 async function add(pts){
   if(!isMyTurn()){alert("現在あなたのチーム（またはあなた）の番ではありません。"); return;}
@@ -1535,6 +1688,9 @@ async function add(pts){
     if(!s||!s.matches[activeIdx])return false;
     if((s.activeMatchIndex||0)!==activeIdx){staleInput=true;return false;}
     const match = s.matches[activeIdx];
+    const sides=match.customSides||match.sides;
+    const result=replay(sides,getGameThrows(match,gIdx),getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule);
+    if(!currentPlayer||(!isAdmin()&&!hasInputLease(d)&&!sides[result.turn]?.players.includes(currentPlayer)))return false;
     if((match.currentGameIndex||0)!==gIdx){staleInput=true;return false;}
     const gameKey = `game${gIdx + 1}`;
     if(!Array.isArray(match[gameKey])) match[gameKey] = [];
@@ -1549,6 +1705,7 @@ async function add(pts){
 $("pad").innerHTML=[...Array(13).keys()].map(i=>`<button data-p="${i}">${i}</button>`).join("");
 $("pad").onclick=e=>{
   const p=e.target.dataset.p;if(p===undefined||!data||cur<0)return;
+  if(selectedThrow){correctThrow(+p).catch(error=>alert("修正を保存できませんでした。"));return;}
   const set = data.sets[cur];
   const activeIdx = set.activeMatchIndex || 0;
   const m = set.matches[activeIdx];
@@ -1560,27 +1717,21 @@ $("pad").onclick=e=>{
   if(currentMatchRes.winner === null && !S_over) add(+p);
 };
 
+function selectThrow(index){
+  if(!currentPlayer||!data||cur<0)return;
+  const set=data.sets[cur],mi=set.activeMatchIndex||0,m=set.matches[mi],gi=m.currentGameIndex||0;
+  const list=getGameThrows(m,gi);
+  if(index<0||index>=list.length)return;
+  selectedThrow={sid:set.id,mi,gi,index,snapshot:JSON.stringify(list)};
+  render();
+}
 $("undo").onclick=()=>{
-  const set=data.sets[cur],sid=set.id,activeIdx=set.activeMatchIndex || 0;
-  return mutate(d=>{
-    const s=findSet(d,sid);if(!s)return false;
-    const match = s.matches[activeIdx];
-    if(!match) return false;
-    const gIdx = match.currentGameIndex || 0;
-    const gameThrows = getGameThrows(match, gIdx);
-    if(gameThrows.length > 0){
-      gameThrows.pop();
-      match.throws = gameThrows;
-    } else if(gIdx > 0){
-      match.currentGameIndex = gIdx - 1;
-      match.throws = getGameThrows(match, match.currentGameIndex);
-    } else if(activeIdx > 0){
-      s.activeMatchIndex = activeIdx - 1;
-    } else {
-      return false;
-    }
-  });
+  if(!data||cur<0)return;
+  const set=data.sets[cur],m=set.matches[set.activeMatchIndex||0];
+  selectThrow(selectedThrow?selectedThrow.index-1:getGameThrows(m,m.currentGameIndex||0).length-1);
 };
+$("return-live").onclick=()=>{selectedThrow=null;render();};
+$("log").onclick=e=>{const row=e.target.closest("[data-throw]");if(row)selectThrow(Number(row.dataset.throw));};
 
 $("next").onclick=()=>{
   const set=data.sets[cur];
@@ -1602,19 +1753,18 @@ $("next").onclick=()=>{
 };
 
 $("save-order").onclick = async () => {
+  if(!currentPlayer){alert("観戦中は変更できません。");return;}
   const set = data.sets[cur];
   const activeIdx = set.activeMatchIndex || 0;
   const m = set.matches[activeIdx] || set.matches[0];
   const origSides = m.customSides || m.sides;
 
   const newCustomSides=getOrderSidesFromForm(set,m);
-  if(!getGameThrows(m,m.currentGameIndex||0).length){m.start=0;m.gameStarts=m.gameStarts||[];m.gameStarts[m.currentGameIndex||0]=0;}
-  
-  // 先に画面上のデータへ反映し、次へ進む操作ですぐ参照できるようにする
-  m.customSides = newCustomSides;
+  if(getGameThrows(m,m.currentGameIndex||0).length){alert("投球開始後の並び順変更は記録の投球者が変わるため保存できません。");return;}
   await mutate(d => {
     const s = findSet(d, set.id);
     if(s && s.matches[activeIdx]) {
+      if(getGameThrows(s.matches[activeIdx],s.matches[activeIdx].currentGameIndex||0).length)return false;
       s.matches[activeIdx].customSides = newCustomSides;
       if(!getGameThrows(s.matches[activeIdx],s.matches[activeIdx].currentGameIndex||0).length){s.matches[activeIdx].start=0;s.matches[activeIdx].gameStarts=s.matches[activeIdx].gameStarts||[];s.matches[activeIdx].gameStarts[s.matches[activeIdx].currentGameIndex||0]=0;}
     }
@@ -1655,7 +1805,7 @@ async function proceedToNextStep(customSides) {
           const gameResult = replay(sides, getGameThrows(match, gameIndex), getGameStart(match,gameIndex), isTeamSet(s.type), s.missRule, s.overRule);
           gameResult.st.forEach((side, i) => totals[i] += side.score);
         }
-        if(Math.max(...totals) === Math.min(...totals)) {
+        if(totals.filter(score=>score===Math.max(...totals)).length>1) {
           match.currentGameIndex = gamesToPlay;
           const tieBreakKey = `game${gamesToPlay + 1}`;
           match[tieBreakKey] = [];
@@ -1700,7 +1850,7 @@ async function proceedToNextStep(customSides) {
       }
     }
 
-    if((isTeamSet(s.type) || s.type === "solo") && s.mode === "first") {
+    if((s.type === "team" || s.type === "solo") && s.mode === "first") {
       const target=Math.max(1,parseInt(s.games,10)||1);
       const blocks=s.type==="solo"&&Array.isArray(s.blocks)&&s.blocks.length?s.blocks:[{name:null,players:s.sides.map(side=>side.name)}];
       const blockForMatch=match.blockName||null;
@@ -1778,7 +1928,7 @@ async function proceedToNextStep(customSides) {
       }
     }
 
-    if((isTeamSet(s.type) || s.type === "solo") && s.mode === "total") {
+    if((s.type === "team" || s.type === "solo") && s.mode === "total") {
       const regularMatches = s.matches.filter(item => !item.totalTiebreak);
       const tieBreakExists = s.matches.some(item => item.totalTiebreak);
       const regularDone = regularMatches.length > 0 && regularMatches.every(item => getMatchWinner(item, s.missRule, s.overRule, isTeamSet(s.type)) !== null);
@@ -1899,6 +2049,9 @@ function updateTimerDisplay() {
 }
 
 function render(){
+  // 未認証の管理者名が保存されていても、自動でPIN画面は開かない。
+  // 管理者認証は「自分は」で佐藤を選んだ時だけ行う。
+  if(currentPlayer==="佐藤"&&!isAdmin())currentPlayer="";
   const d=data,sets=d.sets;
   const s2=d.players.join("|");
   if(s2!==sig){
@@ -1906,7 +2059,10 @@ function render(){
     $("me").innerHTML='<option value="">（観戦）</option>'+d.players.map(n=>`<option>${esc(n)}</option>`).join("");
     updateTeamCheckboxes();
   }
-  $("me").value=localStorage.me||"";
+  $("me").value=currentPlayer||"";
+  if(!$("me").value)currentPlayer="";
+  $("restrict-my-turn").checked=!isAdmin()&&!hasInputLease(d);
+  $("restrict-my-turn").disabled=isAdmin()||!currentPlayer||inputLeaseBusy;
   $("tabs").innerHTML=sets.map((s,i)=>{
     const status=summarize(s);
     const stateClass=status.over?"finished":"active";
@@ -1923,7 +2079,6 @@ function render(){
   $("v-new").classList.toggle("hide",view!=="new");
   $("v-set").classList.toggle("hide",view!=="set");
   $("v-stats").classList.toggle("hide",view!=="stats");
-  renderHomeMembers();
   if(view==="set")renderSet(sets[cur]);
   if(view==="stats") {stopTimer(); renderStats();}
 }
@@ -2009,7 +2164,7 @@ $("save-solo-blocks").onclick = async () => {
       const sides=block.players.map(name=>byName.get(name));
       for(let round=0;round<roundsByBlock[blockIndex];round++) {
         let start=set.firstRule==="rotate"?round%sides.length:0;
-        if(matches.length===0&&round===0){
+        if(round===0){
           const firstGameRule=$("nfirstgame")?$("nfirstgame").value:"order";
           if(firstGameRule==="shuffle")start=Math.floor(Math.random()*sides.length);
           else if(firstGameRule==="reverse")start=sides.length-1;
@@ -2223,7 +2378,7 @@ function renderSet(set){
     const stSide=currentMatchRes.st[i];
     const pl=s.players.map((p,j)=>{
       const q=stSide.players[j];
-      const historyStr = q.history.length > 0 ? ` [${q.history.join(",")}]` : "";
+      const historyStr = q.history.length > 0 ? ` <span class="score-throw-history">[${q.history.join(",<wbr>")}]</span>` : "";
       return `<span class="score-player-name ${!isTeamSet(set.type)&&q.out?"out":""}"><span class="score-player-icon">👤</span>${esc(p)}${historyStr}${!isTeamSet(set.type)?` <span class="miss-streak">0点連続 ${q.miss}回</span>`:""}</span>`;
     }).join(" ");
     const key = scoreKey(s);
@@ -2238,13 +2393,15 @@ function renderSet(set){
     const teamZeroStreak = isTeamSet(set.type) ? `<div class="miss-streak">0点連続 ${stSide.teamMiss}回</div>` : "";
     const cardStyle=isTeamSet(set.type)?`background:${teamCardColor(s.name)}`:`background:${playerCardColor(i,customSides.length)}`;
     const sideTitle=isTeamSet(set.type)?`<b>${esc(s.name)}</b>`:"";
-    return `<div class="card ${cls}" style="${cardStyle}"><div>${sideTitle}${teamZeroStreak}<div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>今回のゲーム</small><small>${previousLabel} ${previous}</small><small>合計 ${total}点</small></div></div>`;
+    return `<div class="card ${cls}" style="${cardStyle}"><div class="score-side-details">${sideTitle}${teamZeroStreak}<div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>今回のゲーム</small><small>${previousLabel} ${previous}</small><small>合計 ${total}点</small></div></div>`;
   }).join("");
 
   // 個人戦・トーナメント・リーグでもオーダー/先攻後攻の並び替えパネルを表示する
   renderNextOrderForm(set);
 
-  const myTurn = isMyTurn();
+  if(selectedThrow&&(selectedThrow.sid!==set.id||selectedThrow.mi!==activeIdx||selectedThrow.gi!==gIdx||selectedThrow.snapshot!==JSON.stringify(throwsList)))selectedThrow=null;
+  $("edit-throw-status").textContent=selectedThrow?`第${selectedThrow.index+1}投（${throwsList[selectedThrow.index]}点）を選択中。点数ボタンで修正`:"";
+  const myTurn = selectedThrow?correctionAllowed(data,set,m,selectedThrow.index):isMyTurn();
   $("pad").style.display = myTurn ? "grid" : "none";
   $("input-lock-msg").style.display = myTurn ? "none" : "block";
 
@@ -2273,9 +2430,18 @@ function renderSet(set){
   $("results").innerHTML = resultsHtml;
 
   const historyLogs=[];
+  let previousReplay=replay(customSides,[],getGameStart(m,gIdx),isTeamSet(set.type),set.missRule,set.overRule);
   for(let t=1;t<=throwsList.length;t++){
     const rr=replay(customSides,throwsList.slice(0,t),getGameStart(m,gIdx),isTeamSet(set.type),set.missRule,set.overRule);
-    historyLogs.push(t+"投目 → "+throwsList[t-1]+"点（"+rr.st.map((x,i)=>esc(customSides[i].name)+" "+x.score).join(" / ")+"）");
+    let thrower="投球者不明";
+    rr.st.forEach((side,i)=>side.players.forEach((player,j)=>{
+      if(player.n>previousReplay.st[i].players[j].n){
+        const name=customSides[i].players[j];
+        thrower=isTeamSet(set.type)?`${customSides[i].name}・${name}`:name;
+      }
+    }));
+    historyLogs.push(`<span data-throw="${t-1}" class="${selectedThrow?.index===t-1?"selected-throw":""}" style="cursor:pointer">${t}投目 👤${esc(thrower)} → ${throwsList[t-1]}点（${rr.st.map((x,i)=>esc(customSides[i].name)+" "+x.score).join(" / ")}）</span>`);
+    previousReplay=rr;
   }
   $("log").innerHTML=historyLogs.reverse().join("<br>");
 }
