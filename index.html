@@ -65,7 +65,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v1.33</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v1.34</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -146,7 +146,7 @@ td.l,th.l{text-align:left}
 </div>
 <p id="league-games-desc" class="pl hide">各対戦カードで設定試合数を行い、合計得点で勝者を決めます。同点の場合は延長ゲームを行います。</p>
 <div id="league-game-first-box" class="hide">
-<label>対戦カード内の複数ゲームの先攻 <select id="league-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームで点が低かったサイド</option><option value="same">いつも同じサイド</option></select></label>
+<label>対戦カード内の複数ゲームの先攻 <select id="league-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームの得点が低い順</option><option value="same">いつも同じサイド</option></select></label>
 </div>
 <div id="tournament-setting-box" class="hide" style="background:#eef4fb; padding:8px; border-radius:8px; margin:8px 0;">
 <label>トーナメントの対戦ルール <select id="ntournament-mode">
@@ -155,7 +155,7 @@ td.l,th.l{text-align:left}
 <option value="match_total" selected>③ 設定した試合数の合計得点（同点なら延長ゲーム）</option>
 </select></label>
 <div id="tournament-game-first-box" class="hide">
-<label>対戦カード内の複数ゲームの先攻 <select id="ntournament-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームで点が低かったサイド</option><option value="same">いつも同じサイド</option></select></label>
+<label>対戦カード内の複数ゲームの先攻 <select id="ntournament-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームの得点が低い順</option><option value="same">いつも同じサイド</option></select></label>
 </div>
 </div>
 <label>0点3回連続のルール <select id="nmissrule">
@@ -177,7 +177,7 @@ td.l,th.l{text-align:left}
 </select></label>
 <label id="second-game-rule-label">2試合目以降の先攻 <select id="nfirst">
 <option value="rotate">順番に交代する</option>
-<option value="loser" selected>前の試合で点が低かったサイド</option>
+<option value="loser" selected>前の試合の得点が低い順</option>
 <option value="same">いつも同じサイド（初戦の先攻）</option>
 </select></label>
 </div>
@@ -268,8 +268,10 @@ let matchTimerInterval = null;
 let timerSeconds = 0;
 let isTimerRunning = false;
 
-function replay(sides,throws,start,isTeam,missRule,overRule){
+function replay(sides,throws,start,isTeam,missRule,overRule,sideOrder){
   const n=sides.length;
+  const order=Array.isArray(sideOrder)&&sideOrder.length===n&&new Set(sideOrder).size===n&&sideOrder.every(i=>Number.isInteger(i)&&i>=0&&i<n)?sideOrder:Array.from({length:n},(_,i)=>i);
+  const following=(current,offset)=>order[(order.indexOf(current)+offset)%n];
   const rule = missRule || "out";
   const over = overRule || "25";
   const st=sides.map(s=>({score:0, ptr:0, teamMiss:0, teamOut:false, teamSkipped:false, throwsHistory: [], players:s.players.map(()=>({miss:0,out:false,pts:0,n:0,zero:0, history:[], skipped:false})) }));
@@ -289,7 +291,7 @@ function replay(sides,throws,start,isTeam,missRule,overRule){
     let s=st[turn];
     if(isTeam && s.teamSkipped){
       s.teamSkipped = false;
-      for(let k=1;k<=n;k++){const j=(turn+k)%n;if(!sideOut(j)){turn=j;break;}}
+      for(let k=1;k<=n;k++){const j=following(turn,k);if(!sideOut(j)){turn=j;break;}}
       s=st[turn];
     }
     const pi=pick(turn),p=s.players[pi];
@@ -317,7 +319,7 @@ function replay(sides,throws,start,isTeam,missRule,overRule){
     if(winner!==null)break;
     const alive=st.map((_,i)=>i).filter(i=>!sideOut(i));
     if(n>1&&alive.length===1){winner=alive[0];break;}
-    for(let k=1;k<=n;k++){const j=(turn+k)%n;if(!sideOut(j)){turn=j;break;}}
+    for(let k=1;k<=n;k++){const j=following(turn,k);if(!sideOut(j)){turn=j;break;}}
   }
   return {st,turn,winner,who:winner===null?pick(turn):null};
 }
@@ -364,9 +366,9 @@ async function activatePlayer(){
 let orderFormKey="";
 function throwOwners(set,match,list){
   const sides=match.customSides||match.sides,g=match.currentGameIndex||0;
-  let before=replay(sides,[],getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule);
+  let before=replay(sides,[],getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,g));
   return list.map((_,index)=>{
-    const after=replay(sides,list.slice(0,index+1),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule);
+    const after=replay(sides,list.slice(0,index+1),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,g));
     let owner=null;
     after.st.forEach((side,i)=>side.players.forEach((p,j)=>{
       if(p.n>before.st[i].players[j].n)owner=JSON.stringify([sides[i].name,sides[i].players[j]]);
@@ -394,8 +396,8 @@ function correctionAllowed(d,set,match,index){
   if(isAdmin()||hasInputLease(d))return true;
   const sides=match.customSides||match.sides,g=match.currentGameIndex||0;
   const list=getGameThrows(match,g);
-  const before=replay(sides,list.slice(0,index),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule);
-  const after=replay(sides,list.slice(0,index+1),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule);
+  const before=replay(sides,list.slice(0,index),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,g));
+  const after=replay(sides,list.slice(0,index+1),getGameStart(match,g),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,g));
   return sides.some((side,i)=>side.players.includes(me)&&after.st[i].players.some((p,j)=>p.n>before.st[i].players[j].n));
 }
 async function correctThrow(points){
@@ -414,7 +416,7 @@ async function correctThrow(points){
       alert("この変更では失格・休み・勝利の状態が変わり、後続の投球者と矛盾するため保存できません。");return false;
     }
     // 後続記録が勝利確定後の投球になる変更は保存しない。
-    if(changed.length>selection.index+1&&replay(match.customSides||match.sides,changed.slice(0,-1),getGameStart(match,selection.gi),isTeamSet(set.type),set.missRule,set.overRule).winner!==null){alert("この変更では途中でゲームが終了し、後続の投球と矛盾します。");return false;}
+    if(changed.length>selection.index+1&&replay(match.customSides||match.sides,changed.slice(0,-1),getGameStart(match,selection.gi),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,selection.gi)).winner!==null){alert("この変更では途中でゲームが終了し、後続の投球と矛盾します。");return false;}
     match[`game${selection.gi+1}`]=changed;match.throws=changed;saved=true;
   });
   if(saved)selectedThrow=null;
@@ -595,7 +597,8 @@ function calculateGameStart(set,match,nextGameIndex){
   const previousStart=getGameStart(match,previousIndex);
   const rule=match.gameFirstRule||set.gameFirstRule||"rotate";
   if(rule==="same")return getGameStart(match,0);
-  const rotated=(previousStart+1)%sides.length;
+  const previousOrder=getGameSideOrder(match,previousIndex);
+  const rotated=previousOrder[(previousOrder.indexOf(previousStart)+1)%sides.length];
   if(rule==="rotate")return rotated;
   if(rule==="loser"){
     const result=replay(sides,getGameThrows(match,previousIndex),previousStart,isTeamSet(set.type),set.missRule,set.overRule);
@@ -613,7 +616,22 @@ function ensureGameStart(set,match,gameIndex){
   if(!Array.isArray(match.gameStarts))match.gameStarts=[];
   if(!Number.isInteger(match.gameStarts[0]))match.gameStarts[0]=Number.isInteger(match.start)?match.start:0;
   for(let index=1;index<=gameIndex;index++){
-    if(!Number.isInteger(match.gameStarts[index]))match.gameStarts[index]=calculateGameStart(set,match,index);
+    if(!Number.isInteger(match.gameStarts[index])){
+      const rule=match.gameFirstRule||set.gameFirstRule||"rotate";
+      if(rule==="loser"){
+        const previousOrder=getGameSideOrder(match,index-1);
+        const result=replay(match.customSides||match.sides,getGameThrows(match,index-1),getGameStart(match,index-1),isTeamSet(set.type),set.missRule,set.overRule,previousOrder);
+        const order=[...previousOrder].sort((a,b)=>result.st[a].score-result.st[b].score);
+        if(!match.gameOrders||Array.isArray(match.gameOrders))match.gameOrders=Object.fromEntries(Object.entries(match.gameOrders||{}));
+        match.gameOrders[index]=order;match.gameStarts[index]=order[0];
+      } else {
+        match.gameStarts[index]=calculateGameStart(set,match,index);
+        if(!match.gameOrders||Array.isArray(match.gameOrders))match.gameOrders=Object.fromEntries(Object.entries(match.gameOrders||{}));
+        const previousOrder=getGameSideOrder(match,rule==="same"?0:index-1);
+        const first=previousOrder.indexOf(match.gameStarts[index]);
+        match.gameOrders[index]=previousOrder.slice(first).concat(previousOrder.slice(0,first));
+      }
+    }
   }
   return match.gameStarts[gameIndex];
 }
@@ -631,19 +649,19 @@ function getMatchWinner(m, missRule, overRule, isTeam=false) {
     const totals = customSides.map(() => 0);
     for(let gameIndex = 0; gameIndex < gamesToPlay; gameIndex++) {
       const game = getGameThrows(m, gameIndex);
-      const result = replay(customSides, game, getGameStart(m,gameIndex), isTeam, missRule, overRule);
+      const result = replay(customSides, game, getGameStart(m,gameIndex), isTeam, missRule, overRule,getGameSideOrder(m,gameIndex));
       if(result.winner === null) return null;
       result.st.forEach((side, i) => totals[i] += side.score);
     }
     const maxScore = Math.max(...totals);
     const winners = totals.map((score, i) => score === maxScore ? i : -1).filter(i => i >= 0);
     if(winners.length === 1) return winners[0];
-    const tieBreak = replay(customSides, getGameThrows(m, gamesToPlay), getGameStart(m,gamesToPlay), isTeam, missRule, overRule);
+    const tieBreak = replay(customSides, getGameThrows(m, gamesToPlay), getGameStart(m,gamesToPlay), isTeam, missRule, overRule,getGameSideOrder(m,gamesToPlay));
     return tieBreak.winner;
   } else if (mode === "game2_wins") {
     const wins = customSides.map(() => 0);
     [g1, g2, g3].forEach((game,gameIndex) => {
-      const result = replay(customSides, game, getGameStart(m,gameIndex), isTeam, missRule, overRule);
+      const result = replay(customSides, game, getGameStart(m,gameIndex), isTeam, missRule, overRule,getGameSideOrder(m,gameIndex));
       if(result.winner !== null) wins[result.winner]++;
     });
     const maxWins = Math.max(...wins);
@@ -651,11 +669,33 @@ function getMatchWinner(m, missRule, overRule, isTeam=false) {
     return null;
   } else {
     if(g1.length > 0) {
-      const result = replay(customSides, g1, getGameStart(m,0), isTeam, missRule, overRule);
+      const result = replay(customSides, g1, getGameStart(m,0), isTeam, missRule, overRule,getGameSideOrder(m,0));
       return result.winner;
     }
     return null;
   }
+}
+
+function getGameSideOrder(match,gameIndex){
+  const sides=match.customSides||match.sides;
+  const count=sides.length;
+  if(!count)return [];
+  const saved=match.gameOrders?.[gameIndex];
+  if(Array.isArray(saved)&&saved.length===count&&new Set(saved).size===count&&saved.every(i=>Number.isInteger(i)&&i>=0&&i<count))return [...saved];
+  const start=((getGameStart(match,gameIndex)%count)+count)%count;
+  return Array.from({length:count},(_,offset)=>(start+offset)%count);
+}
+
+function getMatchCardsHTML(match,set){
+  const sides=match.customSides||match.sides;
+  const card=index=>getGameSideOrder(match,index).map(slot=>sides[slot]?sideLabel(set,sides[slot]):esc(isTournamentSet(set.type)?getTournamentSlotLabel(set,match,slot):"未定")).join(" vs ");
+  const parts=[];
+  const multi=match.tournamentMode&&match.tournamentMode!=="game1";
+  for(let index=0;index<Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1);index++){
+    if(!getGameThrows(match,index).length)continue;
+    parts.push(`${multi?`第${index+1}ゲーム: `:""}${card(index)}`);
+  }
+  return parts.length?parts.join("<br>"):card(0);
 }
 
 function getMatchScoreHTML(match, set) {
@@ -664,11 +704,26 @@ function getMatchScoreHTML(match, set) {
   for(let gameIndex = 0; gameIndex < Math.max(3, (parseInt(match.gamesToPlay, 10) || 1) + 1); gameIndex++) {
     const throws = getGameThrows(match, gameIndex);
     if(throws.length === 0) continue;
-    const result = replay(sides, throws, getGameStart(match,gameIndex), isTeamSet(set.type), set.missRule, set.overRule);
-    const scores = sides.map((side, i) => `${sideLabel(set,side)} ${result.st[i].score}点`).join(" / ");
+    const result = replay(sides, throws, getGameStart(match,gameIndex), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(match,gameIndex));
+    const scores = getGameSideOrder(match,gameIndex).map(i => `${sideLabel(set,sides[i])} ${result.st[i].score}点`).join(" / ");
     parts.push(`${match.tournamentMode && match.tournamentMode !== "game1" ? `第${gameIndex+1}ゲーム: ` : ""}${scores}`);
   }
   return parts.length ? parts.join("<br>") : "-";
+}
+
+function getMatchStartsHTML(match,set){
+  const sides=match.customSides||match.sides;
+  const label=index=>{
+    const start=getGameStart(match,index),side=sides[start];
+    return esc(side?side.name:(isTournamentSet(set.type)?getTournamentSlotLabel(set,match,start):"未定"));
+  };
+  const parts=[];
+  const multi=match.tournamentMode&&match.tournamentMode!=="game1";
+  for(let index=0;index<Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1);index++){
+    if(!getGameThrows(match,index).length)continue;
+    parts.push(`${multi?`第${index+1}ゲーム: `:""}${label(index)}`);
+  }
+  return parts.length?parts.join("<br>"):label(0);
 }
 
 function isMyTurn(){
@@ -684,7 +739,7 @@ function isMyTurn(){
   const customSides = m.customSides || m.sides;
   const currentGameIndex = m.currentGameIndex || 0;
   const throwsList = getGameThrows(m, currentGameIndex);
-  const currentMatchRes = replay(customSides, throwsList, getGameStart(m,currentGameIndex), isTeamSet(set.type), set.missRule, set.overRule);
+  const currentMatchRes = replay(customSides, throwsList, getGameStart(m,currentGameIndex), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,currentGameIndex));
   if(currentMatchRes.winner !== null) return true;
   const currentSideIndex = currentMatchRes.turn;
   const currentSide = customSides[currentSideIndex];
@@ -707,7 +762,7 @@ function getSetTotalScores(set) {
     for(let gameIndex = 0; gameIndex < gameCount; gameIndex++) {
       const throws = getGameThrows(match, gameIndex);
       if(throws.length === 0) continue;
-      const result = replay(sides, throws, getGameStart(match,gameIndex), isTeamSet(set.type), set.missRule, set.overRule);
+      const result = replay(sides, throws, getGameStart(match,gameIndex), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(match,gameIndex));
       result.st.forEach((sideResult, i) => {
         const key = scoreSideKey(sides[i], set.type);
         totals.set(key, (totals.get(key) || 0) + sideResult.score);
@@ -734,7 +789,7 @@ function getLeagueStandings(set){
       const limit=Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1);
       for(let gameIndex=0;gameIndex<limit;gameIndex++){
         const throws=getGameThrows(match,gameIndex); if(!throws.length)continue;
-        const result=replay(sides,throws,getGameStart(match,gameIndex),isTeamSet(set.type),set.missRule,set.overRule);
+        const result=replay(sides,throws,getGameStart(match,gameIndex),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,gameIndex));
         sides.forEach((side,i)=>{
           const row=rows.get(side.name); if(!row)return;
           row.pointsFor+=result.st[i].score;
@@ -886,7 +941,7 @@ function renderLeaguePlayoffPanel(set){
       <option value="match_total" ${mode==="match_total"?"selected":""}>設定試合数の合計得点（同点は延長）</option>
     </select></label>
     <label>合計得点方式の試合数 <input id="league-playoff-games" type="number" min="1" max="99" value="1"></label>
-    <div id="league-playoff-game-first-box"><label>対戦カード内の複数ゲームの先攻 <select id="league-playoff-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームで点が低かったサイド</option><option value="same">いつも同じサイド</option></select></label></div>
+    <div id="league-playoff-game-first-box"><label>対戦カード内の複数ゲームの先攻 <select id="league-playoff-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームの得点が低い順</option><option value="same">いつも同じサイド</option></select></label></div>
     <label>0点3回連続 <select id="league-playoff-miss"><option value="out" ${set.missRule==="out"?"selected":""}>失格・負け</option><option value="skip" ${set.missRule==="skip"?"selected":""}>1回休み</option></select></label>
     <label>50点超過 <select id="league-playoff-over"><option value="25" ${set.overRule==="25"?"selected":""}>25点に戻る</option><option value="0" ${set.overRule==="0"?"selected":""}>0点に戻る</option><option value="minus" ${set.overRule==="minus"?"selected":""}>超過分を引く</option></select></label>
     <label>組合せ方法 <select id="league-playoff-draw"><option value="cross">ブロック間対戦を優先</option><option value="ranked">順位順シード</option><option value="random">ランダム抽選</option></select></label>
@@ -1017,7 +1072,7 @@ function tally(room){
       const gamesList = Array.from({length: Math.max(3, (parseInt(m.gamesToPlay, 10) || 1) + 1)}, (_, i) => getGameThrows(m, i));
       gamesList.forEach((gt,gameIndex) => {
         if(gt.length === 0) return;
-        const r = replay(matchSides, gt, getGameStart(m,gameIndex), isTeamSet(set.type), set.missRule, set.overRule);
+        const r = replay(matchSides, gt, getGameStart(m,gameIndex), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,gameIndex));
         r.st.forEach((sd,i)=>sd.players.forEach((p,j)=>{
           const t=get(matchSides[i].players[j]);
           t.n+=p.n;t.pts+=p.pts;t.zero+=p.zero;
@@ -1279,7 +1334,7 @@ function renderNextOrderForm(set) {
     return;
   }
   $("order-save-area").style.display="";
-  const activeMatchRes = replay(lastMatchSides, throwsList, getGameStart(m,m.currentGameIndex||0), isTeamSet(set.type), set.missRule, set.overRule);
+  const activeMatchRes = replay(lastMatchSides, throwsList, getGameStart(m,m.currentGameIndex||0), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,m.currentGameIndex||0));
   const descText = set.playoffFirstRule==="manual"&&!getGameThrows(m,0).length
     ? "じゃんけん後、先攻側が先頭になるように並べ替えて保存してください。保存した順番がこの対戦カードの先攻順になります。"
     : activeMatchRes.winner !== null 
@@ -1433,13 +1488,36 @@ $("restrict-my-turn").onchange = async () => {
 };
 
 const MAX_ROOM_SERIALIZED_BYTES=800*1024;
+function applyNextMatchScoreOrder(d,beforeIndices){
+  for(const set of d.sets){
+    const index=set.activeMatchIndex||0;
+    if((set.type!=="solo"&&set.type!=="team")||set.firstRule!=="loser"||beforeIndices.get(set.id)===index)continue;
+    const next=set.matches[index];
+    if(!next||getGameThrows(next,0).length)continue;
+    const nextSides=next.customSides||next.sides;
+    const previous=set.matches.slice(0,index).reverse().find(m=>!m.skipped&&(m.blockName||null)===(next.blockName||null)&&sameSideParticipants(m.customSides||m.sides,nextSides));
+    if(!previous)continue;
+    const previousSides=previous.customSides||previous.sides;
+    const order=getGameSideOrder(previous,0);
+    const result=replay(previousSides,getGameThrows(previous,0),getGameStart(previous,0),isTeamSet(set.type),set.missRule,set.overRule,order);
+    if(result.winner===null)continue;
+    const sorted=[...order].sort((a,b)=>result.st[a].score-result.st[b].score);
+    next.customSides=sorted.map(i=>nextSides.find(side=>side.name===previousSides[i].name));
+    next.start=0;next.gameStarts=[0];next.gameOrders={0:next.customSides.map((_,i)=>i)};
+  }
+}
 async function mutate(fn){
   if(!currentPlayer){alert("観戦中は変更できません。");return;}
   let sizeLimitExceeded=false;
   await runTransaction(db,async tx=>{
     const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
     if(!hasPlayerSession(d)){alert("この名前の利用権限がありません。名前を選び直してください。");return;}
+    const beforeIndices=new Map(d.sets.map(set=>[set.id,set.activeMatchIndex||0]));
     if(fn(d)===false)return;
+    applyNextMatchScoreOrder(d,beforeIndices);
+    for(const set of d.sets)for(const match of set.matches){
+      if(Array.isArray(match.gameOrders))match.gameOrders=Object.fromEntries(Object.entries(match.gameOrders).filter(([,order])=>Array.isArray(order)));
+    }
     const serialized=JSON.stringify(d);
     const byteLength=new TextEncoder().encode(serialized).length;
     if(byteLength>MAX_ROOM_SERIALIZED_BYTES){sizeLimitExceeded=true;return;}
@@ -1689,13 +1767,13 @@ async function add(pts){
     if((s.activeMatchIndex||0)!==activeIdx){staleInput=true;return false;}
     const match = s.matches[activeIdx];
     const sides=match.customSides||match.sides;
-    const result=replay(sides,getGameThrows(match,gIdx),getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule);
+    const result=replay(sides,getGameThrows(match,gIdx),getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule,getGameSideOrder(match,gIdx));
     if(!currentPlayer||(!isAdmin()&&!hasInputLease(d)&&!sides[result.turn]?.players.includes(currentPlayer)))return false;
     if((match.currentGameIndex||0)!==gIdx){staleInput=true;return false;}
     const gameKey = `game${gIdx + 1}`;
     if(!Array.isArray(match[gameKey])) match[gameKey] = [];
     if(match[gameKey].length!==expectedThrowCount){staleInput=true;return false;}
-    if(replay(match.customSides||match.sides,match[gameKey],getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule).winner!==null){staleInput=true;return false;}
+    if(replay(match.customSides||match.sides,match[gameKey],getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule,getGameSideOrder(match,gIdx)).winner!==null){staleInput=true;return false;}
     match[gameKey].push(pts);
     match.throws = match[gameKey];
   });
@@ -1712,7 +1790,7 @@ $("pad").onclick=e=>{
   const customSides = m.customSides || m.sides;
   const gIdx = m.currentGameIndex || 0;
   const throwsList = getGameThrows(m, gIdx);
-  const currentMatchRes = replay(customSides, throwsList, getGameStart(m,m.currentGameIndex||0), isTeamSet(set.type), set.missRule, set.overRule);
+  const currentMatchRes = replay(customSides, throwsList, getGameStart(m,m.currentGameIndex||0), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,m.currentGameIndex||0));
   const S_over = summarize(set).over;
   if(currentMatchRes.winner === null && !S_over) add(+p);
 };
@@ -1740,7 +1818,7 @@ $("next").onclick=()=>{
   const customSides = m.customSides || m.sides;
   const gIdx = m.currentGameIndex || 0;
   const throwsList = getGameThrows(m, gIdx);
-  const currentMatchRes = replay(customSides, throwsList, getGameStart(m,m.currentGameIndex||0), isTeamSet(set.type), set.missRule, set.overRule);
+  const currentMatchRes = replay(customSides, throwsList, getGameStart(m,m.currentGameIndex||0), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,m.currentGameIndex||0));
   
   if(currentMatchRes.winner === null) {
     alert("このゲームがまだ終了していません。");
@@ -1749,7 +1827,7 @@ $("next").onclick=()=>{
   const displayedOrder=getOrderSidesFromForm(set,m);
   const requestedOrder=sameSideOrder(displayedOrder,customSides)?(m.customSides||null):displayedOrder;
   isOrderHidden = false; 
-  proceedToNextStep(requestedOrder);
+  proceedToNextStep(requestedOrder).catch(error=>{console.error(error);alert("次のゲームへの変更を保存できませんでした。通信状態を確認して、もう一度押してください。");});
 };
 
 $("save-order").onclick = async () => {
@@ -1802,7 +1880,7 @@ async function proceedToNextStep(customSides) {
         const sides = match.customSides || match.sides;
         const totals = sides.map(() => 0);
         for(let gameIndex = 0; gameIndex < gamesToPlay; gameIndex++) {
-          const gameResult = replay(sides, getGameThrows(match, gameIndex), getGameStart(match,gameIndex), isTeamSet(s.type), s.missRule, s.overRule);
+          const gameResult = replay(sides, getGameThrows(match, gameIndex), getGameStart(match,gameIndex), isTeamSet(s.type), s.missRule, s.overRule,getGameSideOrder(match,gameIndex));
           gameResult.st.forEach((side, i) => totals[i] += side.score);
         }
         if(totals.filter(score=>score===Math.max(...totals)).length>1) {
@@ -1817,7 +1895,7 @@ async function proceedToNextStep(customSides) {
     } else if (mode === "game2_wins") {
       const wins = (match.customSides || match.sides).map(() => 0);
       [g1, g2, g3].forEach((game,gameIndex) => {
-        const result = replay(match.customSides || match.sides, game, getGameStart(match,gameIndex), isTeamSet(s.type), s.missRule, s.overRule);
+        const result = replay(match.customSides || match.sides, game, getGameStart(match,gameIndex), isTeamSet(s.type), s.missRule, s.overRule,getGameSideOrder(match,gameIndex));
         if(result.winner !== null) wins[result.winner]++;
       });
       if(Math.max(...wins) < 2 && gIdx < 2) {
@@ -2200,7 +2278,7 @@ function renderSet(set){
   
   const gIdx = m.currentGameIndex || 0;
   const throwsList = getGameThrows(m, gIdx);
-  const currentMatchRes = replay(customSides, throwsList, getGameStart(m,gIdx), isTeamSet(set.type), set.missRule, set.overRule);
+  const currentMatchRes = replay(customSides, throwsList, getGameStart(m,gIdx), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,gIdx));
   const curDone = currentMatchRes.winner !== null;
   
   const matchWinnerIdx = getMatchWinner(m, set.missRule, set.overRule, isTeamSet(set.type));
@@ -2361,7 +2439,7 @@ function renderSet(set){
     for(let gameIndex = 0; gameIndex <= lastGame; gameIndex++) {
       const gameThrows = getGameThrows(historyMatch, gameIndex);
       if(gameThrows.length === 0) continue;
-      const gameResult = replay(historySides, gameThrows, getGameStart(historyMatch,gameIndex), isTeamSet(set.type), set.missRule, set.overRule);
+      const gameResult = replay(historySides, gameThrows, getGameStart(historyMatch,gameIndex), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(historyMatch,gameIndex));
       gameResult.st.forEach((sideResult, sideIndex) => {
         const key = scoreKey(historySides[sideIndex]);
         matchTotals.set(key, (matchTotals.get(key) || 0) + sideResult.score);
@@ -2373,7 +2451,8 @@ function renderSet(set){
     }
   }
 
-  $("board").innerHTML=customSides.map((s,i)=>{
+  $("board").innerHTML=getGameSideOrder(m,gIdx).map(i=>{
+    const s=customSides[i];
     const cls=currentMatchRes.winner===i?"side win":(!curDone&&!S.over&&currentMatchRes.turn===i?"side now":"side");
     const stSide=currentMatchRes.st[i];
     const pl=s.players.map((p,j)=>{
@@ -2384,7 +2463,7 @@ function renderSet(set){
     const key = scoreKey(s);
     let previousScore = previousScores.has(key) ? previousScores.get(key) : null;
     if(gIdx > 0) {
-      const priorGame = replay(customSides, getGameThrows(m, gIdx - 1), getGameStart(m,gIdx-1), isTeamSet(set.type), set.missRule, set.overRule);
+      const priorGame = replay(customSides, getGameThrows(m, gIdx - 1), getGameStart(m,gIdx-1), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,gIdx-1));
       previousScore = priorGame.st[i].score;
     }
     const previous = previousScore === null ? "-" : `${previousScore}点`;
@@ -2421,18 +2500,17 @@ function renderSet(set){
     const mw = getMatchWinner(mt, set.missRule, set.overRule, isTeamSet(set.type));
     const matchStarted=[mt.throws,mt.game1,mt.game2,mt.game3].some(list=>Array.isArray(list)&&list.length>0);
     const winnerText = mt.skipped ? "スキップ" : mw !== null ? sideLabel(set,mSides[mw]) : (matchStarted||isLeagueSet(set.type) ? "進行中" : "未実施");
-    const vsString = mSides.map((side,slot)=>side?sideLabel(set,side):(isTournamentSet(set.type)?getTournamentSlotLabel(set,mt,slot):"未定")).join(" vs ");
-    const startSide=mSides[mt.start];
-    const startText=startSide?startSide.name:(isTournamentSet(set.type)?getTournamentSlotLabel(set,mt,mt.start):"未定");
+    const vsString = getMatchCardsHTML(mt,set);
+    const startText=getMatchStartsHTML(mt,set);
     const scoreText = getMatchScoreHTML(mt, set);
-    return `<tr><td>${mi+1}${mt.blockName ? `<br>${esc(mt.blockName)}・第${mt.round}試合` : ""}</td><td>${esc(startText)}</td><td>${esc(vsString)}</td><td>${scoreText}</td><td>${winnerText}</td></tr>`;
+    return `<tr><td>${mi+1}${mt.blockName ? `<br>${esc(mt.blockName)}・第${mt.round}試合` : ""}</td><td>${startText}</td><td>${vsString}</td><td>${scoreText}</td><td>${winnerText}</td></tr>`;
   }).join("") + "</table>";
   $("results").innerHTML = resultsHtml;
 
   const historyLogs=[];
-  let previousReplay=replay(customSides,[],getGameStart(m,gIdx),isTeamSet(set.type),set.missRule,set.overRule);
+  let previousReplay=replay(customSides,[],getGameStart(m,gIdx),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(m,gIdx));
   for(let t=1;t<=throwsList.length;t++){
-    const rr=replay(customSides,throwsList.slice(0,t),getGameStart(m,gIdx),isTeamSet(set.type),set.missRule,set.overRule);
+    const rr=replay(customSides,throwsList.slice(0,t),getGameStart(m,gIdx),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(m,gIdx));
     let thrower="投球者不明";
     rr.st.forEach((side,i)=>side.players.forEach((player,j)=>{
       if(player.n>previousReplay.st[i].players[j].n){
