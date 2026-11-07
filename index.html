@@ -65,7 +65,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.12</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.17</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -240,9 +240,9 @@ td.l,th.l{text-align:left}
 <div id="sync-notice" class="sync-notice" role="status" aria-live="polite"></div>
 <div class="grid" id="pad"></div>
 <p><button class="go hide" id="next">次の対戦へ進む</button></p>
-<p><button class="sub" id="undo">1つ戻す</button>
-<button class="sub" id="return-live">最新に戻る</button><span id="edit-throw-status" role="status"></span>
-<button class="sub hide" id="archive-set">中断して保存（勝敗なし）</button></p>
+<p><button class="sub" id="undo">修正</button>
+<button class="sub" id="return-live">最新</button><span id="edit-throw-status" role="status"></span>
+<button class="sub hide" id="archive-set">中断終了（勝敗なし）</button></p>
 </div>
 </div>
 <div class="card" id="input-lock-msg" style="color:#c33;font-weight:bold;text-align:center;display:none;">
@@ -469,7 +469,7 @@ function authenticateAdminSelection(){
   }
 }
 function correctionAllowed(d,set,match,index){
-  if(set.archived)return false;
+  if(set.archived||match.skipped)return false;
   const me=currentPlayer||"";
   if(!me)return false;
   if(!hasPlayerSession(d))return false;
@@ -488,6 +488,7 @@ async function correctThrow(points){
   if(!Number.isInteger(points)||points<0||points>12)throw Error("得点は0〜12で指定してください。");
   const saved=await mutate(d=>{
     const set=findSet(d,selection.sid),match=set?.matches[selection.mi];
+    if(match?.skipped)throw Error("スキップ済みゲームは修正できません。");
     if(set?.archived)throw Error("中断保存済みのセットは変更できません。");
     if(!match||(set.activeMatchIndex||0)!==selection.mi||(match.currentGameIndex||0)!==selection.gi)throw Error("試合の進行が更新されました。最新の画面で投球を選び直してください。");
     const list=getGameThrows(match,selection.gi);
@@ -677,7 +678,7 @@ function recordedGameIndices(match){
   return Object.keys(match).filter(key=>/^game\d+$/.test(key)&&Number(key.slice(4))>=1&&Array.isArray(match[key])&&match[key].length).map(key=>Number(key.slice(4))-1).sort((a,b)=>a-b);
 }
 function archiveCompletedGames(set){
-  return set.matches.reduce((count,match)=>count+recordedGameIndices(match).filter(index=>replay(match.customSides||match.sides,getGameThrows(match,index),getGameStart(match,index),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,index)).winner!==null).length,0);
+  return set.matches.reduce((count,match)=>count+(match.skipped?[]:recordedGameIndices(match)).filter(index=>replay(match.customSides||match.sides,getGameThrows(match,index),getGameStart(match,index),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,index)).winner!==null).length,0);
 }
 
 function getGameStart(match,gameIndex){
@@ -796,6 +797,7 @@ function getMatchCardsHTML(match,set){
 }
 
 function getMatchScoreHTML(match, set) {
+  if(match.skipped)return "-";
   const sides = match.customSides || match.sides;
   const parts = [];
   for(let gameIndex = 0; gameIndex < Math.max(3, (parseInt(match.gamesToPlay, 10) || 1) + 1); gameIndex++) {
@@ -827,6 +829,14 @@ function resultBlockKey(match){
   return JSON.stringify([!!(match.totalTiebreak||match.leaguePlayoff),match.blockName||""]);
 }
 
+function recoverSkippedActiveMatch(roomData){
+  for(const set of roomData.sets||[]){
+    if(set.archived||!set.matches?.[set.activeMatchIndex||0]?.skipped)continue;
+    const next=set.matches.findIndex(match=>!match.skipped&&getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type))===null);
+    if(next>=0)set.activeMatchIndex=next;
+  }
+}
+
 function resultGameSchedule(match,set){
   const mode=match.tournamentMode||"game1";
   const planned=mode==="game2_wins"?3:mode==="match2_total"?2:mode==="match_total"?Math.max(1,parseInt(match.gamesToPlay,10)||2):1;
@@ -840,11 +850,14 @@ function resultGameSchedule(match,set){
   const ordinaryAdded=(set.gameCountChanges||[]).some(change=>(change.matches||[]).some(item=>item.index===index&&item.from===0&&item.to===1));
   return Array.from({length:count},(_,gameIndex)=>{
     const entered=getGameThrows(match,gameIndex).length>0;
-    const skipped=!!match.skipped||(!entered&&(gameIndex>=planned||mode==="game2_wins"&&winner!==null));
+    const extension=(mode==="match_total"||mode==="match2_total")&&gameIndex===planned&&(match.currentGameIndex||0)===planned&&!match.skipped;
+    const skipped=!!match.skipped||(!entered&&!extension&&(gameIndex>=planned||mode==="game2_wins"&&winner!==null));
     const added=!skipped&&(ordinaryAdded||!!latest&&latest.to>latest.from&&gameIndex>=latest.from&&gameIndex<planned);
-    return {index:gameIndex,skipped,added};
+    return {index:gameIndex,skipped,added,extension};
   });
 }
+
+function resultSideLabel(set,side){return esc(sideDisplayName(set,side));}
 
 function getMatchResultRowsHTML(match,set,matchIndex,blockGroup,matchGroup){
   const ordinary=set.type==="solo"||set.type==="team";
@@ -858,20 +871,21 @@ function getMatchResultRowsHTML(match,set,matchIndex,blockGroup,matchGroup){
   const games=schedule.map(game=>game.index);
   const winner=getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type));
   const started=games.some(index=>getGameThrows(match,index).length);
-  const winnerText=match.skipped?(started?"中断（勝敗なし）":"スキップ"):winner!==null?sideLabel(set,sides[winner]):set.archived?(started?"中断":"未実施"):started||isLeagueSet(set.type)?"進行中":"未実施";
-  const label=slot=>sides[slot]?sideLabel(set,sides[slot]):esc(isTournamentSet(set.type)?getTournamentSlotLabel(set,match,slot):"未定");
-  return schedule.map(({index:gameIndex,skipped,added},row)=>{
+  const winnerText=match.skipped?(started&&getMatchWinner({...match,skipped:false},set.missRule,set.overRule,isTeamSet(set.type))===null?"打切り（勝敗なし）":"スキップ"):winner!==null?resultSideLabel(set,sides[winner]):set.archived?(started?"中断":"未実施"):started||isLeagueSet(set.type)?"進行中":"未実施";
+  const label=slot=>sides[slot]?resultSideLabel(set,sides[slot]):esc(isTournamentSet(set.type)?getTournamentSlotLabel(set,match,slot):"未定");
+  return schedule.map(({index:gameIndex,skipped,added,extension},row)=>{
     const order=getGameSideOrder(match,gameIndex),throws=getGameThrows(match,gameIndex);
     const result=throws.length?replay(sides,throws,getGameStart(match,gameIndex),isTeamSet(set.type),set.missRule,set.overRule,order):null;
     const pending=!throws.length&&gameIndex>(match.currentGameIndex||0)&&(!match.gameStarts||!Number.isInteger(match.gameStarts[gameIndex]));
-    const scores=result?order.map(slot=>`${label(slot)} ${result.st[slot].score}点`).join(" / "):"-";
+    const cutShort=skipped&&result&&result.winner===null;
+    const scores=(!skipped||cutShort)&&result?order.map(slot=>`<span style="display:inline-block;white-space:nowrap">${label(slot)} ${result.st[slot].score}点</span>`).join(" / <wbr>"):order.map(slot=>`<span style="display:inline-block;white-space:nowrap">${label(slot)}</span>`).join(" vs <wbr>");
     const blockCell=blockGroup?(blockGroup.first?`<td rowspan="${blockGroup.rows}">${blockNumber}</td>`:""):`<td rowspan="${games.length}">${blockNumber}</td>`;
     const displayMatchNumber=set.type==="team"&&(match.totalTiebreak||match.leaguePlayoff)?`決定戦<br>${matchGroup?matchGroup.number:matchNumber}`:matchGroup?matchGroup.number:matchNumber;
     const numberCell=matchGroup?(matchGroup.first?`<td rowspan="${matchGroup.rows}">${displayMatchNumber}</td>`:""):`<td rowspan="${games.length}">${displayMatchNumber}</td>`;
     const matchCell=row===0?(blockColumns?`${blockCell}${numberCell}`:matchGroup?numberCell:!ordinary?`<td rowspan="${games.length}">${matchIndex+1}${match.blockName?`<br>${esc(match.blockName)}・第${match.round}試合`:""}</td>`:""):"";
     const gameLabel=matchGroup?matchGroup.offset+row+1:blockColumns?gameIndex+1:ordinary?`${match.blockName?`${esc(match.blockName)}・`:""}${match.round||matchIndex+1}`:gameIndex+1;
     const winnerCell=row===0?(matchGroup?(matchGroup.first?`<td rowspan="${matchGroup.rows}">${matchGroup.winnerText}</td>`:""):`<td rowspan="${games.length}">${winnerText}</td>`):"";
-    return `<tr>${matchCell}<td>${gameLabel}${skipped?(throws.length?"<br>中断":"<br>スキップ"):added?"<br>追加":""}</td><td>${pending?"未定":label(getGameStart(match,gameIndex))}</td><td>${order.map(label).join(" vs ")}</td><td>${scores}</td>${winnerCell}</tr>`;
+    return `<tr>${matchCell}<td>${gameLabel}${skipped?(cutShort?"<br>打切り":"<br>スキップ"):set.archived&&result&&result.winner===null?"<br>中断":extension?"<br>延長":added?"<br>追加":""}</td><td>${pending?"未定":label(getGameStart(match,gameIndex))}</td><td>${scores}</td>${winnerCell}</tr>`;
   }).join("");
 }
 
@@ -910,8 +924,8 @@ function getResultsBodyHTML(set){
           summary=summarize({...set,sides:cardSides,matches:cardMatches,blocks:[{name:blockName,players:cardSides.map(side=>side.name)}]});
         }
         const completed=cardMatches.every(match=>match.skipped||getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type))!==null);
-        const started=cardMatches.some(match=>Object.keys(match).some(key=>/^game\d+$/.test(key)&&Array.isArray(match[key])&&match[key].length));
-        const winnerText=set.archived?"中断保存（勝敗なし）":summary.over&&summary.winnerNames.length?`${summary.winnerNames.length>1?"同率：":""}${summary.winnerNames.map(name=>sideLabel(set,{name})).join("・")}`:completed&&started?"決着待ち":started?"進行中":"未実施";
+        const started=cardMatches.some(match=>!match.skipped&&Object.keys(match).some(key=>/^game\d+$/.test(key)&&Array.isArray(match[key])&&match[key].length));
+        const winnerText=set.archived?"中断保存（勝敗なし）":summary.over&&summary.winnerNames.length?`${summary.winnerNames.length>1?"同率：":""}${summary.winnerNames.map(name=>resultSideLabel(set,{name})).join("・")}`:completed&&started?"決着待ち":started?"進行中":"未実施";
         let offset=0;
         return card.map((item,index)=>{
           const html=getMatchResultRowsHTML(item.match,set,item.index,{first:firstBlockRow,rows},{first:index===0,rows:cardRows,number:cardIndex+1,offset,winnerText});
@@ -924,7 +938,7 @@ function getResultsBodyHTML(set){
 }
 
 function isMyTurn(){
-  if(cur<0||!data||!data.sets[cur]||data.sets[cur].archived)return false;
+  if(cur<0||!data||!data.sets[cur]||data.sets[cur].archived||data.sets[cur].matches[data.sets[cur].activeMatchIndex||0]?.skipped)return false;
   const me = currentPlayer || "";
   if(!me)return false;
   if(!hasPlayerSession(data))return false;
@@ -977,7 +991,7 @@ function getLeagueStandings(set){
     const names=block.players||[];
     const rows=new Map(names.map((name,index)=>[name,{name,wins:0,matchesPlayed:0,pointsFor:0,pointsAgainst:0,headToHeadWins:0,seed:index}]));
     const directResults=[];
-    set.matches.filter(match=>!match.leaguePlayoff&&(block.name?match.blockName===block.name:!match.blockName)).forEach(match=>{
+    set.matches.filter(match=>!match.skipped&&!match.leaguePlayoff&&(block.name?match.blockName===block.name:!match.blockName)).forEach(match=>{
       const sides=match.customSides||match.sides;
       const winner=getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type));
       if(winner!==null) sides.forEach(side=>{const row=rows.get(side.name);if(row)row.matchesPlayed++;});
@@ -1223,6 +1237,7 @@ function summarize(set){
         if(wins.has(name)) wins.set(name, wins.get(name)+1);
       }
       const target = firstTarget(set,block.name);
+      if(!blockMatches.some(match=>!match.skipped)){allBlocksDone=false;continue;}
       if(set.mode === "first") {
         const reached = [...wins].filter(([,count])=>count>=target).map(([name])=>name);
         if(reached.length) winningNames.push(reached[0]);
@@ -1268,6 +1283,7 @@ function tally(room){
   (room.players||[]).forEach(get);
   (room.sets||[]).forEach(set=>{
     set.matches.forEach((m)=>{
+      if(m.skipped)return;
       const matchSides = m.customSides || m.sides;
       recordedGameIndices(m).forEach(gameIndex => {
         const gt=getGameThrows(m,gameIndex);
@@ -1692,6 +1708,7 @@ function reconnectRoom(){
       if(!d||!Array.isArray(d.sets)){
         roomSyncBlocked=true;roomSyncError="部屋の記録を取得できません。部屋コードと通信状態を確認してください。";renderRoomSyncStatus();return;
       }
+      recoverSkippedActiveMatch(d);
       if(!snapshot.metadata?.fromCache&&!snapshot.metadata?.hasPendingWrites){roomSyncBlocked=false;roomSyncError="";}
       if(firstSnap){firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";queueMicrotask(()=>activatePlayer());}
       else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderHidden=false;}
@@ -1740,6 +1757,7 @@ async function mutate(fn){
   const saved=await runTransaction(db,async tx=>{
     const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
     if(!hasPlayerSession(d)){alert("この名前の利用権限がありません。名前を選び直してください。");return;}
+    recoverSkippedActiveMatch(d);
     const beforeIndices=new Map(d.sets.map(set=>[set.id,set.activeMatchIndex||0]));
     const protectedSets=new Map(d.sets.filter(set=>set.archived).map(set=>[set.id,JSON.stringify(set)]));
     if(fn(d)===false)return;
@@ -2014,6 +2032,7 @@ async function add(pts){
     if(s.archived){alert("中断保存済みのセットは変更できません。");return false;}
     if((s.activeMatchIndex||0)!==activeIdx){staleInput=true;return false;}
     const match = s.matches[activeIdx];
+    if(match.skipped){staleInput=true;return false;}
     const sides=match.customSides||match.sides;
     const result=replay(sides,getGameThrows(match,gIdx),getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule,getGameSideOrder(match,gIdx));
     if(!currentPlayer||(!isAdmin()&&!hasInputLease(d)&&!sides[result.turn]?.players.includes(currentPlayer)))return false;
@@ -2313,6 +2332,7 @@ async function proceedToNextStep(customSides) {
     const s=findSet(d,sid);
     if(!s)return false;
     if(s.archived)throw Error("中断保存済みのセットは変更できません。");
+    if(s.matches[s.activeMatchIndex||0]?.skipped)throw Error("スキップ済みゲームは進行できません。");
     const latest=s.matches[s.activeMatchIndex||0];
     if((s.activeMatchIndex||0)!==expectedIndex||!latest||(latest.currentGameIndex||0)!==expectedGame||nextStepToken(s)!==expectedMatch){
       throw Error("別の端末で記録または進行が更新されました。最新の画面を確認してください。");
@@ -2400,7 +2420,7 @@ async function proceedToNextStep(customSides) {
           if(winner!==null){const sides=item.customSides||item.sides;const name=sides[winner]?.name;if(wins.has(name))wins.set(name,wins.get(name)+1);}
         });
         if([...wins.values()].some(count=>count>=target)) {
-          s.matches.forEach((item,index)=>{if(index>s.activeMatchIndex&&(item.blockName||null)===blockForMatch&&!item.skipped)item.skipped=true;});
+          s.matches.forEach((item,index)=>{if(index>s.activeMatchIndex&&(item.blockName||null)===blockForMatch&&!item.skipped&&!hasSetThrows({matches:[item]}))item.skipped=true;});
         }
       }
       let nextIndex=s.activeMatchIndex+1;
@@ -2479,7 +2499,7 @@ async function proceedToNextStep(customSides) {
           const previousMatch=regularMatches[regularMatches.length-1];
           const tieBreak = {sides:tiedSides, start:getNextFirstSideIndex(s,previousMatch,tiedSides), throws:[], game1:[], game2:[], game3:[], currentGameIndex:0, tournamentMode:"game1", totalTiebreak:true};
           s.matches.push(tieBreak);
-          s.activeMatchIndex++;
+          s.activeMatchIndex=s.matches.length-1;
           return;
         }
       }
@@ -2960,7 +2980,7 @@ function renderSet(set){
       const isDone = mw !== null;
       const mSides = mt.customSides || mt.sides;
       const matchStarted=[mt.throws,mt.game1,mt.game2,mt.game3].some(list=>Array.isArray(list)&&list.length>0);
-      const winnerName = isDone ? mSides[mw].name : set.archived?(matchStarted?"中断":"未実施"):(matchStarted||isLeagueSet(set.type) ? "進行中" : "未実施");
+      const winnerName = mt.skipped?(matchStarted&&getMatchWinner({...mt,skipped:false},set.missRule,set.overRule,isTeamSet(set.type))===null?"打切り":"スキップ"):isDone ? mSides[mw].name : set.archived?(matchStarted?"中断":"未実施"):(matchStarted||isLeagueSet(set.type) ? "進行中" : "未実施");
       let bLabel = `【試合${idx+1}】`;
       if(isLeagueSet(set.type)) {
         bLabel = `【${mt.blockName ? `${mt.blockName}・` : ""}第${mt.round || idx+1}試合】`;
@@ -3049,7 +3069,7 @@ function renderSet(set){
   const previousScores = new Map(), totalScores = new Map();
   for(let matchIndex = 0; matchIndex <= activeIdx; matchIndex++) {
     const historyMatch = set.matches[matchIndex];
-    if(!historyMatch) continue;
+    if(!historyMatch||historyMatch.skipped) continue;
     const historySides = historyMatch.customSides || historyMatch.sides;
     const matchTotals = new Map();
     const lastGame = matchIndex === activeIdx ? gIdx : Math.max(2, parseInt(historyMatch.gamesToPlay, 10) || 1);
@@ -3113,7 +3133,7 @@ function renderSet(set){
   $("next").classList.toggle("hide", !curDone || S.over);
   $("next").textContent = matchOver ? "次の対戦（次の試合）へ進む" : "次のゲームへ進む";
 
-  const resultsHtml=`<table><tr>${set.type==="solo"||set.type==="league"?"<th>ブロック</th><th>試合</th>":"<th>試合</th>"}<th>ゲーム</th><th>先攻</th><th>対戦カード</th><th>対戦スコア</th><th>勝者</th></tr>`+
+  const resultsHtml=`<table><tr>${set.type==="solo"||set.type==="league"?"<th>ブロック</th><th>試合</th>":"<th>試合</th>"}<th>ゲーム</th><th>先攻</th><th>対戦・得点</th><th>勝者</th></tr>`+
     getResultsBodyHTML(set)+"</table>";
   setHTMLIfChanged($("results"),resultsHtml);
 
