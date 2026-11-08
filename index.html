@@ -54,6 +54,9 @@ td.l,th.l{text-align:left}
 .result-status-s{color:#7b1fa2}
 .result-status-a{color:#1565c0}
 .result-status-q{color:#b45309}
+.home-member-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:5px 7px;background:#eee;border-radius:7px}
+.home-member-chip label{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow-wrap:anywhere}
+.home-member-chip button{font-size:12px;padding:4px 6px;min-height:32px;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -69,11 +72,13 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.22</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.26</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
 <p class="pl">参加するメンバーにチェックを入れてください。新しいメンバーを追加することもできます。</p>
+<p class="pl">固定8名は名前変更・削除できません。追加メンバーは編集できます。候補一覧と参加チェックはこの端末・ブラウザーに自動保存します。</p>
+<div id="home-members-status" class="pl" role="status" aria-live="polite"></div>
 <div id="home-players-container" style="margin:8px 0; display:flex; flex-wrap:wrap; gap:8px;"></div>
 <div style="display:flex; gap:6px; margin-top:8px;">
 <input id="new-home-member" type="text" placeholder="新しいメンバーの名前" style="margin:0;">
@@ -551,28 +556,103 @@ setInterval(async()=>{
   } catch(error){console.warn("入力枠の更新に失敗",error);}
   if(data)render();
 },25000);
-let homeMembersList = ["加藤", "木下", "佐藤", "千田", "成澤", "林", "広田", "前澤"];
-
-function renderHomeMembers() {
-  const container = $("home-players-container");
-  if(!container) return;
-  container.innerHTML = homeMembersList.map(name => {
-    return `<label style="display:inline-flex; align-items:center; background:#eee; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:15px; margin:2px;">` +
-           `<input type="checkbox" class="home-member-chk" value="${esc(name)}" checked style="margin-right:6px; width:18px; height:18px;"> ${esc(name)}` +
-           `</label>`;
-  }).join("");
+const HOME_MEMBERS_KEY="molkky_home_members";
+const HOME_SELECTION_KEY="molkky_home_member_selection";
+const FIXED_HOME_MEMBERS=Object.freeze(["加藤","木下","佐藤","千田","成澤","林","広田","前澤"]);
+const DEFAULT_HOME_MEMBERS=[...FIXED_HOME_MEMBERS];
+function isFixedHomeMember(name){return FIXED_HOME_MEMBERS.includes(name);}
+let homeMembersStatus="";
+function loadHomeMembers(){
+  try{
+    const raw=localStorage.getItem(HOME_MEMBERS_KEY);
+    if(raw===null)return [...DEFAULT_HOME_MEMBERS];
+    const saved=JSON.parse(raw);
+    if(!Array.isArray(saved)||saved.some(name=>typeof name!=="string"))throw Error("invalid members");
+    return [...FIXED_HOME_MEMBERS,...new Set(saved.map(name=>name.trim()).filter(name=>name&&!isFixedHomeMember(name)))];
+  }catch(error){
+    homeMembersStatus="候補一覧を読み込めなかったため初期候補を表示しています。追加・変更すると保存を試みます。";
+    return [...DEFAULT_HOME_MEMBERS];
+  }
 }
-renderHomeMembers();
+let homeMembersList=loadHomeMembers();
+function loadHomeMemberSelection(){
+  try{
+    const raw=localStorage.getItem(HOME_SELECTION_KEY);
+    if(raw===null)return new Set(homeMembersList);
+    const selected=JSON.parse(raw);
+    if(!Array.isArray(selected)||selected.some(name=>typeof name!=="string"))throw Error("invalid selection");
+    return new Set(selected.map(name=>name.trim()).filter(name=>homeMembersList.includes(name)));
+  }catch(error){
+    homeMembersStatus+=(homeMembersStatus?" ":"")+"参加チェックを読み込めなかったため、全員を選択しています。";
+    return new Set(homeMembersList);
+  }
+}
+let homeMemberSelection=loadHomeMemberSelection();
+function saveHomeMembers(){
+  try{
+    localStorage.setItem(HOME_MEMBERS_KEY,JSON.stringify(homeMembersList));
+    localStorage.setItem(HOME_SELECTION_KEY,JSON.stringify([...homeMemberSelection]));
+    homeMembersStatus="この端末に保存しました。";
+    return true;
+  }catch(error){
+    homeMembersStatus="候補一覧・参加チェックを保存できませんでした。この画面では変更されていますが、再読み込みすると戻る可能性があります。";
+    return false;
+  }
+}
+function captureHomeMemberSelection(){
+  homeMemberSelection=new Set([...$("home-players-container").querySelectorAll(".home-member-chk")].filter(box=>box.checked).map(box=>box.value));
+}
+function renderHomeMembers(){
+  const container=$("home-players-container");if(!container)return;
+  container.innerHTML=homeMembersList.map((name,index)=>{
+    const actions=isFixedHomeMember(name)?"":`<button type="button" class="sub" data-home-action="rename" data-home-index="${index}" aria-label="${esc(name)}の候補名を変更">変更</button><button type="button" class="sub" data-home-action="remove" data-home-index="${index}" aria-label="${esc(name)}を候補から削除">×</button>`;
+    return `<div class="home-member-chip"><label><input type="checkbox" class="home-member-chk" value="${esc(name)}" ${homeMemberSelection.has(name)?"checked":""} style="margin:0;width:18px;height:18px">${esc(name)}</label>${actions}</div>`;
+  }).join("");
+  $("home-members-status").textContent=homeMembersStatus;
+}
 
-$("add-home-member").onclick = () => {
-  const input = $("new-home-member");
-  const name = input.value.trim();
-  if(name && !homeMembersList.includes(name)) {
-    homeMembersList.push(name);
-    input.value = "";
-    renderHomeMembers();
+function addHomeMember(){
+  const input=$("new-home-member"),name=input.value.trim();
+  if(!name){alert("名前を入力してください。");return false;}
+  if(homeMembersList.includes(name)){alert("同じ名前が候補に登録されています。");return false;}
+  captureHomeMemberSelection();homeMembersList.push(name);homeMemberSelection.add(name);
+  saveHomeMembers();input.value="";renderHomeMembers();return true;
+}
+function renameHomeMember(index,name){
+  if(!Number.isInteger(index)||index<0||index>=homeMembersList.length)return false;
+  if(isFixedHomeMember(homeMembersList[index])){alert("固定メンバーの名前は変更できません。");return false;}
+  const next=String(name).trim(),previous=homeMembersList[index];
+  if(!next){alert("空白の名前は登録できません。");return false;}
+  if(next===previous)return false;
+  if(homeMembersList.includes(next)){alert("同じ名前が候補に登録されています。");return false;}
+  captureHomeMemberSelection();homeMembersList[index]=next;
+  if(homeMemberSelection.delete(previous))homeMemberSelection.add(next);
+  saveHomeMembers();renderHomeMembers();return true;
+}
+function removeHomeMember(index){
+  if(!Number.isInteger(index)||index<0||index>=homeMembersList.length)return false;
+  if(isFixedHomeMember(homeMembersList[index])){alert("固定メンバーは削除できません。");return false;}
+  captureHomeMemberSelection();homeMemberSelection.delete(homeMembersList[index]);homeMembersList.splice(index,1);
+  saveHomeMembers();renderHomeMembers();return true;
+}
+$("home-players-container").onclick=event=>{
+  const button=event.target.closest("button[data-home-action]");if(!button)return;
+  const index=Number(button.dataset.homeIndex);
+  if(button.dataset.homeAction==="remove")removeHomeMember(index);
+  else if(button.dataset.homeAction==="rename"){
+    if(!Number.isInteger(index)||index<0||index>=homeMembersList.length)return;
+    if(isFixedHomeMember(homeMembersList[index]))return;
+    const name=prompt("この端末の候補名を変更します。既存の部屋・成績の名前は変更しません。",homeMembersList[index]);
+    if(name!==null)renameHomeMember(index,name);
   }
 };
+$("home-players-container").onchange=event=>{
+  if(!event.target.classList?.contains("home-member-chk"))return;
+  captureHomeMemberSelection();saveHomeMembers();
+  $("home-members-status").textContent=homeMembersStatus;
+};
+$("add-home-member").onclick=addHomeMember;
+renderHomeMembers();
 
 function isTeamSet(type){return type==="team"||type==="team_league"||type==="team_tournament";}
 function isLeagueSet(type){return type==="league"||type==="team_league";}
