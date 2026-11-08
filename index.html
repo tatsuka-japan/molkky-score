@@ -50,6 +50,10 @@ td.l,th.l{text-align:left}
 .disabled-member{color:#aaa;text-decoration:line-through;}
 .miss-streak{display:inline-block;margin:3px 0;padding:3px 8px;border-radius:6px;background:#fff0e6;color:#b42318;font-size:15px;font-weight:700;border:1px solid #e7a18e;}
 .ver-badge{display:inline-block;background:#3b6ea8;color:#fff;font-size:11px;padding:2px 6px;border-radius:4px;vertical-align:middle;margin-left:6px;}
+.result-status{font-weight:700}
+.result-status-s{color:#7b1fa2}
+.result-status-a{color:#1565c0}
+.result-status-q{color:#b45309}
 </style>
 </head>
 <body>
@@ -65,7 +69,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.17</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.22</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -229,10 +233,12 @@ td.l,th.l{text-align:left}
 <b>📝 対戦オーダー・投げる順番（先攻・後攻）調整</b>
 <button type="button" class="sub" id="toggle-order-edit-btn" style="font-size:12px; padding:4px 8px;">折りたたむ</button>
 </div>
+<div id="order-edit-content">
 <p class="pl" id="order-edit-desc">試合開始前または次の試合へ進む前に、各サイドの並び順（先攻・後攻）やチーム内オーダーを変更できます。</p>
 <div id="next-order-container"></div>
-<p style="margin-top:8px;" id="order-save-area"><button class="sub" id="save-order" style="font-size:14px; padding:6px 12px; background:#2a9d3a;">順番を保存（次の同じ参加者の試合にも優先）</button></p>
+<p style="margin-top:8px;" id="order-save-area"><button class="sub" id="save-order" style="font-size:14px; padding:6px 12px; background:#2a9d3a;">順番を保存（次もこの並びを基準に先攻条件を適用）</button></p>
 <div id="order-save-status" class="pl" role="status" aria-live="polite"></div>
+</div>
 </div>
 <div id="pad-area">
 <div class="card">
@@ -383,9 +389,10 @@ function updateScoreSaveUI(){
     const pending=pendingScoreInput,set=data?.sets.find(set=>set.id===pending.sid),match=set?.matches[pending.mi];
     if(!match||set.archived||(set.activeMatchIndex||0)!==pending.mi||(match.currentGameIndex||0)!==pending.gi||getGameThrows(match,pending.gi).length>pending.count)pendingScoreInput=null;
   }
-  const busy=roomSyncBlocked||scoreInputBusy||scoreCorrectionBusy||!!pendingScoreInput;
-  $("sync-notice").textContent=roomSyncBlocked?(roomSyncError||"最新の記録を確認中です。入力は受信後に再開します。"):scoreInputBusy||scoreCorrectionBusy?scoreSaveMessage||"保存中…":pendingScoreInput?"保存済み・画面の更新を待っています…":scoreSaveMessage;
+  const busy=roomSyncBlocked||orderSaveBusy||scoreInputBusy||scoreCorrectionBusy||!!pendingScoreInput;
+  $("sync-notice").textContent=roomSyncBlocked?(roomSyncError||"最新の記録を確認中です。入力は受信後に再開します。"):orderSaveBusy?"順番を保存中…":scoreInputBusy||scoreCorrectionBusy?scoreSaveMessage||"保存中…":pendingScoreInput?"保存済み・画面の更新を待っています…":scoreSaveMessage;
   $("reconnect-room").disabled=!room||scoreInputBusy||scoreCorrectionBusy;
+  $("save-order").disabled=busy||!!data?.sets[cur]&&hasSetThrows({matches:[data.sets[cur].matches[data.sets[cur].activeMatchIndex||0]]});
   $("pad").setAttribute("aria-busy",String(busy));
   $("pad").querySelectorAll("button").forEach(button=>{button.disabled=busy;});
   for(const id of ["undo","return-live","next","archive-set"]){const button=$(id);button.disabled=busy||(id==="next"&&nextStepBusy)||(id==="archive-set"&&archiveSetBusy)||(id==="undo"&&!!data?.sets[cur]?.archived);}
@@ -656,18 +663,25 @@ function sameSideOrder(first,second){
 }
 function getOrderSidesFromForm(set,match){
   const original=match.customSides||match.sides;
+  const displayed=getGameSideOrder(match,match.currentGameIndex||0).map(index=>original[index]);
   if(isTeamSet(set.type)) {
     const cards=[...document.querySelectorAll(".next-team-card")];
-    if(!cards.length)return original;
+    if(!cards.length)return displayed;
     return cards.map(card=>{
       const index=parseInt(card.dataset.sideIndex,10),side=original[index];
+      if(!side)throw Error("参加者が変更されています。最新の画面を確認してください。");
       const players=[...card.querySelectorAll(".next-member-item")].map(item=>item.dataset.member);
+      if(JSON.stringify([...players].sort())!==JSON.stringify([...side.players].sort()))throw Error("チームのメンバーが変更されています。最新の画面を確認してください。");
       return {name:side.name,players};
     });
   }
   const items=[...document.querySelectorAll(".next-side-item")];
-  if(!items.length)return original;
-  return items.map(item=>({name:item.dataset.sideName,players:JSON.parse(item.dataset.sidePlayers||"[]")}));
+  if(!items.length)return displayed;
+  return items.map(item=>{
+    const side=original.find(side=>side.name===item.dataset.sideName);
+    if(!side)throw Error("参加者が変更されています。最新の画面を確認してください。");
+    return {name:side.name,players:[...side.players]};
+  });
 }
 
 function getGameThrows(match, gameIndex) {
@@ -859,6 +873,11 @@ function resultGameSchedule(match,set){
 
 function resultSideLabel(set,side){return esc(sideDisplayName(set,side));}
 
+function resultStatusMark(code){
+  const title={S:"スキップ",A:"追加",Q:"中断"}[code];
+  return `<span class="result-status result-status-${code.toLowerCase()}" title="${title}">${code}</span>`;
+}
+
 function getMatchResultRowsHTML(match,set,matchIndex,blockGroup,matchGroup){
   const ordinary=set.type==="solo"||set.type==="team";
   const blockColumns=set.type==="solo"||set.type==="league";
@@ -871,7 +890,7 @@ function getMatchResultRowsHTML(match,set,matchIndex,blockGroup,matchGroup){
   const games=schedule.map(game=>game.index);
   const winner=getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type));
   const started=games.some(index=>getGameThrows(match,index).length);
-  const winnerText=match.skipped?(started&&getMatchWinner({...match,skipped:false},set.missRule,set.overRule,isTeamSet(set.type))===null?"打切り（勝敗なし）":"スキップ"):winner!==null?resultSideLabel(set,sides[winner]):set.archived?(started?"中断":"未実施"):started||isLeagueSet(set.type)?"進行中":"未実施";
+  const winnerText=match.skipped?(started&&getMatchWinner({...match,skipped:false},set.missRule,set.overRule,isTeamSet(set.type))===null?"打切り（勝敗なし）":resultStatusMark("S")):winner!==null?resultSideLabel(set,sides[winner]):set.archived?(started?resultStatusMark("Q"):"未実施"):started||isLeagueSet(set.type)?"進行中":"未実施";
   const label=slot=>sides[slot]?resultSideLabel(set,sides[slot]):esc(isTournamentSet(set.type)?getTournamentSlotLabel(set,match,slot):"未定");
   return schedule.map(({index:gameIndex,skipped,added,extension},row)=>{
     const order=getGameSideOrder(match,gameIndex),throws=getGameThrows(match,gameIndex);
@@ -885,7 +904,7 @@ function getMatchResultRowsHTML(match,set,matchIndex,blockGroup,matchGroup){
     const matchCell=row===0?(blockColumns?`${blockCell}${numberCell}`:matchGroup?numberCell:!ordinary?`<td rowspan="${games.length}">${matchIndex+1}${match.blockName?`<br>${esc(match.blockName)}・第${match.round}試合`:""}</td>`:""):"";
     const gameLabel=matchGroup?matchGroup.offset+row+1:blockColumns?gameIndex+1:ordinary?`${match.blockName?`${esc(match.blockName)}・`:""}${match.round||matchIndex+1}`:gameIndex+1;
     const winnerCell=row===0?(matchGroup?(matchGroup.first?`<td rowspan="${matchGroup.rows}">${matchGroup.winnerText}</td>`:""):`<td rowspan="${games.length}">${winnerText}</td>`):"";
-    return `<tr>${matchCell}<td>${gameLabel}${skipped?(cutShort?"<br>打切り":"<br>スキップ"):set.archived&&result&&result.winner===null?"<br>中断":extension?"<br>延長":added?"<br>追加":""}</td><td>${pending?"未定":label(getGameStart(match,gameIndex))}</td><td>${scores}</td>${winnerCell}</tr>`;
+    return `<tr>${matchCell}<td>${gameLabel}${skipped?(cutShort?"<br>打切り":"<br>"+resultStatusMark("S")):set.archived&&result&&result.winner===null?"<br>"+resultStatusMark("Q"):extension?"<br>延長":added?"<br>"+resultStatusMark("A"):""}</td><td>${pending?"未定":label(getGameStart(match,gameIndex))}</td><td>${scores}</td>${winnerCell}</tr>`;
   }).join("");
 }
 
@@ -925,7 +944,7 @@ function getResultsBodyHTML(set){
         }
         const completed=cardMatches.every(match=>match.skipped||getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type))!==null);
         const started=cardMatches.some(match=>!match.skipped&&Object.keys(match).some(key=>/^game\d+$/.test(key)&&Array.isArray(match[key])&&match[key].length));
-        const winnerText=set.archived?"中断保存（勝敗なし）":summary.over&&summary.winnerNames.length?`${summary.winnerNames.length>1?"同率：":""}${summary.winnerNames.map(name=>resultSideLabel(set,{name})).join("・")}`:completed&&started?"決着待ち":started?"進行中":"未実施";
+        const winnerText=set.archived?resultStatusMark("Q")+"（勝敗なし）":summary.over&&summary.winnerNames.length?`${summary.winnerNames.length>1?"同率：":""}${summary.winnerNames.map(name=>resultSideLabel(set,{name})).join("・")}`:completed&&started?"決着待ち":started?"進行中":"未実施";
         let offset=0;
         return card.map((item,index)=>{
           const html=getMatchResultRowsHTML(item.match,set,item.index,{first:firstBlockRow,rows},{first:index===0,rows:cardRows,number:cardIndex+1,offset,winnerText});
@@ -1532,13 +1551,16 @@ window.sortSolo = (btn, direction) => {
 function renderNextOrderForm(set) {
   if(set.archived){$("match-order-card").style.display="none";return;}
   const current=set.matches[set.activeMatchIndex||0];
-  const key=JSON.stringify([set.id,set.activeMatchIndex||0,current.currentGameIndex||0,current.customSides||current.sides,getGameThrows(current,current.currentGameIndex||0)]);
-  $("match-order-card").style.display=isOrderHidden?"none":"block";
+  const key=JSON.stringify([set.id,set.activeMatchIndex||0,current.currentGameIndex||0,current.customSides||current.sides,getGameStart(current,current.currentGameIndex||0),getGameSideOrder(current,current.currentGameIndex||0),getGameThrows(current,current.currentGameIndex||0)]);
+  $("match-order-card").style.display="block";
+  $("order-edit-content").style.display=isOrderHidden?"none":"block";
+  $("toggle-order-edit-btn").textContent=isOrderHidden?"展開する":"折りたたむ";
   if(key===orderFormKey)return;
   orderFormKey=key;
   const activeIdx = set.activeMatchIndex || 0;
   const m = set.matches[activeIdx] || set.matches[0];
-  const lastMatchSides = m.customSides || m.sides;
+  const storedSides=m.customSides||m.sides;
+  const lastMatchSides=getGameSideOrder(m,m.currentGameIndex||0).map(index=>storedSides[index]);
   
   const currentGameIndex = m.currentGameIndex || 0;
   const throwsList = getGameThrows(m, currentGameIndex);
@@ -1548,12 +1570,12 @@ function renderNextOrderForm(set) {
     $("order-edit-desc").textContent="対戦カード内のゲームが始まったため、過去の得点記録を保つためサイド順を固定しています。次ゲームの先攻は設定した先攻方式で決まります。";
     $("next-order-container").innerHTML="<p class=\"pl\">この対戦カードのサイド順は固定中です。</p>";
     $("order-save-area").style.display="none";
-    $("match-order-card").style.display=isOrderHidden?"none":"block";
+    $("match-order-card").style.display="block";
     return;
   }
   $("order-save-area").style.display="";
   $("save-order").disabled=orderSaveBusy||hasSetThrows({matches:[m]});
-  const activeMatchRes = replay(lastMatchSides, throwsList, getGameStart(m,m.currentGameIndex||0), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,m.currentGameIndex||0));
+  const activeMatchRes = replay(storedSides, throwsList, getGameStart(m,m.currentGameIndex||0), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(m,m.currentGameIndex||0));
   const descText = set.playoffFirstRule==="manual"&&!getGameThrows(m,0).length
     ? "じゃんけん後、先攻側が先頭になるように並べ替えて保存してください。保存した順番がこの対戦カードの先攻順になります。"
     : activeMatchRes.winner !== null 
@@ -1564,7 +1586,7 @@ function renderNextOrderForm(set) {
   let html = "";
   if (isTeamSet(set.type)) {
     html = lastMatchSides.map((s, idx) => {
-      return `<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px; background:${teamCardColor(s.name)};" class="next-team-card" data-side-index="${idx}">
+      return `<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px; background:${teamCardColor(s.name)};" class="next-team-card" data-side-index="${storedSides.indexOf(s)}">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <b>${esc(s.name)}</b>
           <div>
@@ -1587,7 +1609,7 @@ function renderNextOrderForm(set) {
     // 個人戦・トーナメント・リーグの場合：サイド（対戦者・先攻後攻）そのものを並び替え可能
     html = `<div style="background:#fff; padding:8px; border-radius:6px; border:1px solid #ddd;" id="next-sides-group">` +
       lastMatchSides.map((s, idx) => {
-        return `<div style="display:flex; justify-content:space-between; align-items:center; margin:6px 0; padding:6px; background:#f9f9f9; border-radius:4px;" class="next-side-item" data-side-name="${esc(s.name)}" data-side-players='${JSON.stringify(s.players)}'>
+        return `<div style="display:flex; justify-content:space-between; align-items:center; margin:6px 0; padding:6px; background:#f9f9f9; border-radius:4px;" class="next-side-item" data-side-name="${esc(s.name)}">
           <span style="font-weight:bold;">${idx === 0 ? "🔵 1番手: " : idx === 1 ? "🔴 2番手: " : `🟡 ${idx+1}番手: `} ${esc(s.name)}</span>
           <div>
             <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
@@ -1598,7 +1620,7 @@ function renderNextOrderForm(set) {
   }
 
   $("next-order-container").innerHTML = html;
-  $("match-order-card").style.display = isOrderHidden ? "none" : "block";
+  $("match-order-card").style.display="block";
 }
 
 $("toggle-order-edit-btn").onclick = () => {
@@ -2014,13 +2036,14 @@ $("me").onchange=async()=>{
 };
 
 async function add(pts){
-  if(roomSyncBlocked||scoreCorrectionBusy||scoreInputBusy||pendingScoreInput)return false;
+  if(roomSyncBlocked||orderSaveBusy||scoreCorrectionBusy||scoreInputBusy||pendingScoreInput)return false;
   if(!Number.isInteger(pts)||pts<0||pts>12)return false;
   if(!isMyTurn()){alert("現在あなたのチーム（またはあなた）の番ではありません。"); return;}
   const set=data.sets[cur],sid=set.id,activeIdx=set.activeMatchIndex || 0;
   const m = set.matches[activeIdx];
   const gIdx = m.currentGameIndex || 0;
   const expectedThrowCount=getGameThrows(m,gIdx).length;
+  const expectedInputState=nextStepToken(set);
   let staleInput=false;
 
   scoreInputBusy=true;scoreSaveMessage="保存中…";updateScoreSaveUI();
@@ -2032,7 +2055,7 @@ async function add(pts){
     if(s.archived){alert("中断保存済みのセットは変更できません。");return false;}
     if((s.activeMatchIndex||0)!==activeIdx){staleInput=true;return false;}
     const match = s.matches[activeIdx];
-    if(match.skipped){staleInput=true;return false;}
+    if(match.skipped||nextStepToken(s)!==expectedInputState){staleInput=true;return false;}
     const sides=match.customSides||match.sides;
     const result=replay(sides,getGameThrows(match,gIdx),getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule,getGameSideOrder(match,gIdx));
     if(!currentPlayer||(!isAdmin()&&!hasInputLease(d)&&!sides[result.turn]?.players.includes(currentPlayer)))return false;
@@ -2098,7 +2121,8 @@ $("next").onclick=async()=>{
     return;
   }
   const displayedOrder=getOrderSidesFromForm(set,m);
-  const requestedOrder=sameSideOrder(displayedOrder,customSides)?(m.customSides||null):displayedOrder;
+  const actualOrder=getGameSideOrder(m,gIdx).map(index=>customSides[index]);
+  const requestedOrder=sameSideOrder(displayedOrder,actualOrder)?(m.customSides||null):displayedOrder;
   isOrderHidden = false; 
   nextStepBusy=true;$("next").disabled=true;
   try{await proceedToNextStep(requestedOrder);}
@@ -2107,7 +2131,7 @@ $("next").onclick=async()=>{
 };
 
 $("save-order").onclick = async () => {
-  if(orderSaveBusy)return false;
+  if(orderSaveBusy||scoreInputBusy||scoreCorrectionBusy||pendingScoreInput)return false;
   if(!currentPlayer){alert("観戦中は変更できません。");return;}
   const set = data.sets[cur];
   const activeIdx = set.activeMatchIndex || 0;
@@ -2115,11 +2139,11 @@ $("save-order").onclick = async () => {
   if((m.currentGameIndex||0)>0||hasSetThrows({matches:[m]})){alert("投球開始後の並び順変更は記録の投球者が変わるため保存できません。");return false;}
   if(set.archived){alert("中断保存済みのセットは変更できません。");return false;}
   const expected=nextStepToken(set);
-  const newCustomSides=JSON.parse(JSON.stringify(getOrderSidesFromForm(set,m)));
-  if(!sameSideParticipants(m.customSides||m.sides,newCustomSides)){alert("参加者が変更されています。最新の画面を確認してください。");return false;}
   orderSaveBusy=true;$("save-order").disabled=true;
-  $("order-save-status").textContent="保存中…";
+  $("order-save-status").textContent="保存中…";updateScoreSaveUI();
   try{
+  const newCustomSides=JSON.parse(JSON.stringify(getOrderSidesFromForm(set,m)));
+  if(!sameSideParticipants(m.customSides||m.sides,newCustomSides))throw Error("参加者が変更されています。最新の画面を確認してください。");
   const saved=await mutate(d => {
     const s = findSet(d, set.id);
     if(s?.archived)throw Error("中断保存済みのセットは変更できません。");
@@ -2139,7 +2163,7 @@ $("save-order").onclick = async () => {
     const message=`順番を保存できませんでした：${error.message||"通信状態を確認してください。"}`;
     if(data.sets[cur]?.id===set.id)$("order-save-status").textContent=message;
     alert(message);return false;
-  }finally{orderSaveBusy=false;$("save-order").disabled=false;}
+  }finally{orderSaveBusy=false;updateScoreSaveUI();}
 };
 
 function nextStepToken(set){
@@ -2455,9 +2479,11 @@ async function proceedToNextStep(customSides) {
         const defaultSides=isTeamSet(s.type)?s.sides:names.map(name=>s.sides.find(side=>side.name===name)).filter(Boolean);
         if(defaultSides.length<2)return;
         const manualOrderApplies=customSides&&(block.name||null)===(match.blockName||null)&&sameSideParticipants(customSides,defaultSides);
-        const sides=manualOrderApplies?[...customSides]:defaultSides;
-        const round=blockMatches.length+1;
         const previous=blockMatches[blockMatches.length-1];
+        const previousSides=previous&&(previous.customSides||previous.sides);
+        const inherited=previous&&sameSideParticipants(previousSides,defaultSides)?getGameSideOrder(previous,0).map(index=>previousSides[index]):defaultSides;
+        const sides=manualOrderApplies?[...customSides]:inherited;
+        const round=blockMatches.length+1;
         let start=0;
         if(previous)start=getNextFirstSideIndex(s,previous,sides);
         added.push({sides,...(manualOrderApplies?{customSides:[...customSides]}:{}),start,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:"game1",...(block.name?{blockName:block.name,round}:{})});
@@ -3146,7 +3172,7 @@ function renderStats(){
   $("stats-room-info").textContent=`部屋コード：${room||"不明"} ／ 日付：${roomCreatedDate(data)}（部屋作成日）`;
   const T=tally(data);
   $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th></tr>"+
-    T.map(t=>`<tr><td class="l">👤${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.pts}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td></tr>`).join("")+"</table>"+
+    T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.pts}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td></tr>`).join("")+"</table>"+
     "<p class='pl'>「ゲーム数」は決着したゲームの参加数、「勝」はそのうち勝利したゲーム数です。中断保存したセットは決着済みゲームだけを集計し、セット優勝には加算しません。総得点は集計対象の投球で獲得した得点の合計、平均点は1投あたりの得点です。</p>";
 
 }
