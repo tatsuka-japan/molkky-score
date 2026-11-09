@@ -72,7 +72,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.26</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.28</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -105,6 +105,7 @@ td.l,th.l{text-align:left}
 <select id="me" style="width:auto"></select>
 <label style="margin-top:6px;"><input type="checkbox" id="restrict-my-turn" checked> 🔒 自分のチーム（または自分）の番のときだけ入力する</label>
 <div><input id="addname" type="text" placeholder="参加者を追加" style="width:60%"> <button class="sub" id="addbtn">追加</button></div>
+<div id="addname-status" class="pl" role="status" aria-live="polite"></div>
 <button class="sub" id="leave" style="margin-top:6px">退出</button>
 </div>
 <div id="tabs"></div>
@@ -617,6 +618,12 @@ function addHomeMember(){
   if(homeMembersList.includes(name)){alert("同じ名前が候補に登録されています。");return false;}
   captureHomeMemberSelection();homeMembersList.push(name);homeMemberSelection.add(name);
   saveHomeMembers();input.value="";renderHomeMembers();return true;
+}
+function rememberRoomMemberAtHome(name){
+  captureHomeMemberSelection();
+  if(!homeMembersList.includes(name))homeMembersList.push(name);
+  homeMemberSelection.add(name);
+  const saved=saveHomeMembers();renderHomeMembers();return saved;
 }
 function renameHomeMember(index,name){
   if(!Number.isInteger(index)||index<0||index>=homeMembersList.length)return false;
@@ -2102,9 +2109,24 @@ $("copyset").onclick=()=>{
 };
 
 $("addbtn").onclick=async()=>{
-  const n=$("addname").value.trim();if(!n)return;
-  await mutate(d=>{if(d.players.includes(n))return false;d.players.push(n);});
-  $("addname").value="";
+  const input=$("addname"),button=$("addbtn"),name=input.value.trim();
+  if(!name||button.disabled)return false;
+  button.disabled=true;$("addname-status").textContent="追加中…";
+  let alreadyRegistered=false;
+  try{
+    const saved=await mutate(d=>{
+      if(d.players.includes(name)){alreadyRegistered=true;return false;}
+      d.players.push(name);
+    });
+    if(!saved&&!alreadyRegistered){$("addname-status").textContent="参加者を追加できませんでした。通信状態・利用権限を確認してください。";return false;}
+    const remembered=rememberRoomMemberAtHome(name);
+    $("addname-status").textContent=remembered?(alreadyRegistered?"部屋に登録済みです。この端末のホーム候補にも保存しました。":"部屋に追加し、この端末のホーム候補にも保存しました。"):
+      "部屋には登録されていますが、この端末のホーム候補を保存できませんでした。";
+    if(input.value.trim()===name)input.value="";
+    return true;
+  }catch(error){
+    $("addname-status").textContent=`参加者を追加できませんでした：${error.message||"通信状態を確認してください。"}`;return false;
+  }finally{button.disabled=false;}
 };
 
 $("me").onchange=async()=>{
