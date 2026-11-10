@@ -72,7 +72,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.40</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.41</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -2892,14 +2892,29 @@ function timerMillis(value){
   if(Number.isFinite(value?.seconds))return value.seconds*1000+(value.nanoseconds||0)/1000000;
   return Number.isFinite(value)?value:null;
 }
+function canonicalTimerParticipants(value){
+  try{
+    const sides=typeof value==='string'?JSON.parse(value):value;
+    if(!Array.isArray(sides)||sides.some(side=>!Array.isArray(side)||side.length!==2||typeof side[0]!=='string'||!Array.isArray(side[1])||side[1].some(name=>typeof name!=='string')))return null;
+    const compare=(a,b)=>a<b?-1:a>b?1:0;
+    const normalized=sides.map(([name,players])=>[name,[...players].sort(compare)]);
+    normalized.sort((a,b)=>compare(JSON.stringify(a),JSON.stringify(b)));
+    return JSON.stringify(normalized);
+  }catch(error){return null;}
+}
+function sameTimerParticipants(first,second){
+  const normalized=canonicalTimerParticipants(first);
+  return normalized!==null&&normalized===canonicalTimerParticipants(second);
+}
+
 function sharedTimerTarget(set,mi=set.activeMatchIndex||0,gi=set.matches[mi]?.currentGameIndex||0){
   const match=set.matches[mi];if(!match)return null;
-  const participants=(match.customSides||match.sides||[]).filter(Boolean).map(side=>[side.name,[...side.players].sort()]).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
-  return {key:JSON.stringify([String(set.id),mi,gi]),sid:String(set.id),mi,gi,participants:JSON.stringify(participants)};
+  const participants=canonicalTimerParticipants((match.customSides||match.sides||[]).filter(Boolean).map(side=>[side.name,side.players]));
+  return {key:JSON.stringify([String(set.id),mi,gi]),sid:String(set.id),mi,gi,participants};
 }
 function sharedTimerValue(d,target){
   const record=d?.sharedTimers?.[target?.key];
-  return record&&record.participants===target.participants?record:null;
+  return record&&target&&sameTimerParticipants(record.participants,target.participants)?record:null;
 }
 function sharedTimerElapsed(record,now=Date.now()){
   if(!record)return 0;
@@ -2917,7 +2932,7 @@ function settleSharedTimers(d){
   for(const [key,record] of Object.entries(d.sharedTimers||{})){
     if(!record.running)continue;
     const set=d.sets.find(item=>String(item.id)===record.sid),target=set&&sharedTimerTarget(set,record.mi,record.gi);
-    if(!set||!target||(set.activeMatchIndex||0)!==record.mi||(set.matches[record.mi]?.currentGameIndex||0)!==record.gi||record.participants!==target.participants||sharedTimerFinished(set,target)){
+    if(!set||!target||(set.activeMatchIndex||0)!==record.mi||(set.matches[record.mi]?.currentGameIndex||0)!==record.gi||!sameTimerParticipants(record.participants,target.participants)||sharedTimerFinished(set,target)){
       d.sharedTimers[key]={...record,running:false,pausedAt:serverTimestamp(),revision:(record.revision||0)+1};changed=true;
     }
   }
@@ -2926,7 +2941,7 @@ function settleSharedTimers(d){
 async function changeSharedTimer(action){
   if(sharedTimerBusy)return false;
   if(!currentPlayer||roomSyncBlocked){alert("タイマー操作には参加者の選択と接続が必要です。");return false;}
-  const set=data.sets[cur],target=set&&sharedTimerTarget(set);if(!target)return false;
+  const set=data.sets[cur],target=set&&sharedTimerTarget(set);if(!target||!target.participants)return false;
   const code=room,expected=sharedTimerValue(data,target)?.revision||0;
   sharedTimerBusy=true;syncSharedTimerDisplay();
   try{
@@ -2937,7 +2952,7 @@ async function changeSharedTimer(action){
       if(room!==code||!hasPlayerSession(latest))throw Error("参加者の利用権限を確認してください。");
       if(!actualSet||(actualSet.activeMatchIndex||0)!==target.mi||(actualSet.matches[target.mi]?.currentGameIndex||0)!==target.gi)throw Error("ゲームが切り替わりました。");
       const actualTarget=sharedTimerTarget(actualSet);
-      if(actualTarget.participants!==target.participants||sharedTimerFinished(actualSet,actualTarget))throw Error("終了・変更されたゲームのタイマーは操作できません。");
+      if(!sameTimerParticipants(actualTarget.participants,target.participants)||sharedTimerFinished(actualSet,actualTarget))throw Error("終了・変更されたゲームのタイマーは操作できません。");
       const old=sharedTimerValue(latest,target);
       if((old?.revision||0)!==expected)throw Error("別の端末でタイマーが操作されました。表示を確認してください。");
       let next={sid:target.sid,mi:target.mi,gi:target.gi,participants:target.participants,revision:expected+1,elapsedMs:0,running:false,matchStartedAt:null,pausedAt:null};
