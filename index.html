@@ -72,7 +72,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.33</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.35</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -264,6 +264,7 @@ td.l,th.l{text-align:left}
 <div class="card"><b>試合結果</b><div id="results"></div></div>
 </div>
 <div id="v-stats" class="hide">
+<div class="card"><b>セット一覧</b><div id="setlist"></div></div>
 <div class="card"><b>この部屋の通算成績</b>
 <div id="stats-room-info" class="pl"></div>
 <div id="stats"></div>
@@ -277,7 +278,7 @@ td.l,th.l{text-align:left}
 <p class="pl">期間が空欄なら全期間、同じ日を指定すると日別です。名前が同じ人は同一人物として集計します。名前変更前後は別集計です。</p>
 <p id="history-read-status" role="status"></p><div id="history-results"></div><p id="history-sources" class="pl"></p>
 </details></div>
-<div class="card"><b>セット一覧</b><div id="setlist"></div></div>
+
 </div>
 </div>
 </div>
@@ -3280,6 +3281,12 @@ function renderSet(set){
 function renderStats(){
   stopTimer();
   updateSimpleHistoryControls();
+  const typeNames={solo:"個人フリー",team:"団体戦",league:"個人リーグ",team_league:"団体リーグ",tournament:"個人トーナメント",team_tournament:"団体トーナメント"};
+  $("setlist").innerHTML=data.sets.length?"<div style='overflow-x:auto'><table><tr><th>セット名</th><th>種類</th><th>状態</th></tr>"+data.sets.map(set=>{
+    const status=set.archived?"中断終了":summarize(set).over?"終了":hasSetThrows(set)?"進行中":"未開始";
+    return `<tr><td>${esc(set.name||"名称なし")}</td><td>${esc(typeNames[set.type]||set.type||"不明")}</td><td>${status}</td></tr>`;
+  }).join("")+"</table></div><p class='pl'>現在の部屋にあるセットです。生涯成績への保存済み一覧ではありません。</p>":"この部屋にはまだセットがありません。";
+
   $("stats-room-info").textContent=`部屋コード：${room||"不明"} ／ 日付：${roomCreatedDate(data)}（部屋作成日）`;
   const T=tally(data);
   $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th><th>0点率</th></tr>"+
