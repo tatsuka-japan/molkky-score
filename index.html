@@ -54,7 +54,7 @@ td.l,th.l{text-align:left}
 .result-status-s{color:#7b1fa2}
 .result-status-a{color:#1565c0}
 .result-status-q{color:#b45309}
-.home-member-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:5px 7px;background:#eee;border-radius:7px}
+.home-member-chip{display:inline-flex;flex-wrap:wrap;align-items:center;gap:5px;max-width:100%;padding:5px 7px;background:#eee;border-radius:7px}
 .home-member-chip label{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow-wrap:anywhere}
 .home-member-chip button{font-size:12px;padding:4px 6px;min-height:32px;flex-shrink:0}
 </style>
@@ -72,7 +72,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.36</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.40</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -80,6 +80,8 @@ td.l,th.l{text-align:left}
 <p class="pl">固定8名は名前変更・削除できません。追加メンバーは編集できます。候補一覧と参加チェックはこの端末・ブラウザーに自動保存します。</p>
 <div id="home-members-status" class="pl" role="status" aria-live="polite"></div>
 <div id="home-players-container" style="margin:8px 0; display:flex; flex-wrap:wrap; gap:8px;"></div>
+<p class="pl">追加候補の最終利用をこの端末で記録します。自動削除はしません。</p>
+<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><select id="home-cleanup-days" style="width:auto"><option value="90">90日以上未利用</option><option value="180">180日以上未利用</option><option value="365">365日以上未利用</option></select><button type="button" id="home-cleanup" class="sub">未使用の追加候補を整理</button></div>
 <div style="display:flex; gap:6px; margin-top:8px;">
 <input id="new-home-member" type="text" placeholder="新しいメンバーの名前" style="margin:0;">
 <button type="button" class="sub" id="add-home-member" style="font-size:14px; padding:6px 12px;">追加</button>
@@ -98,6 +100,7 @@ td.l,th.l{text-align:left}
 </div>
 <div id="game" class="hide">
 <div id="room-sync-panel" class="card hide" role="status" aria-live="polite"><span id="room-sync-message"></span> <button type="button" id="reconnect-room" class="sub">再接続</button></div>
+<div id="room-capacity-status" class="pl" role="status" aria-live="polite"></div>
 <div class="card">
 <span class="pl">部屋コード</span>
 <span class="big" id="rc"></span>
@@ -199,7 +202,7 @@ td.l,th.l{text-align:left}
 <div class="card">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
 <div><b id="setname"></b> <span class="pl" id="setinfo"></span></div>
-<div class="match-timer-box">
+<div class="match-timer-box" title="このゲームの共有タイマー。操作は参加者のみ。">
 <div id="match-timer-display" class="match-timer">⏱️ 00:00</div>
 <button type="button" id="timer-start-btn" class="sub" style="font-size:13px; padding:4px 10px;">スタート</button>
 <button type="button" id="timer-reset-btn" class="sub" style="font-size:13px; padding:4px 10px; background:#c33;">リセット</button>
@@ -273,7 +276,7 @@ td.l,th.l{text-align:left}
 <div class="card"><details id="simple-history-panel"><summary><b>保存した記録・生涯成績</b></summary>
 <p class="pl">自動保存ではありません。終了・中断保存したセットを管理者が保存します。訂正後も保存・更新が必要です。部屋を削除する前に保存完了を確認してください。</p>
 <p><label>この部屋の開催日 <input type="date" id="history-day"></label> <label><input type="checkbox" id="history-change-day">保存済みの開催日を変更</label> <button id="history-save" class="sub">終了セットを保存・更新（管理者）</button></p>
-<p id="history-targets" class="pl"></p><p id="history-status" role="status"></p>
+<p id="history-targets" class="pl"></p><p id="history-last-saved" class="pl" role="status"></p><p id="history-status" role="status"></p>
 <p><label>開始日 <input type="date" id="history-from"></label> ～ <label>終了日 <input type="date" id="history-to"></label> <button id="history-load" class="sub">保存記録を読込・更新</button></p>
 <p class="pl">期間が空欄なら全期間、同じ日を指定すると日別です。名前が同じ人は同一人物として集計します。名前変更前後は別集計です。</p>
 <p><button id="history-copy" class="sub" disabled>生涯・期間別成績をコピー（Excel用）</button></p><p id="history-read-status" role="status"></p><div id="history-results"></div><p id="history-sources" class="pl"></p>
@@ -296,17 +299,109 @@ function unlock() {
 </script>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getFirestore,doc,setDoc,getDoc,onSnapshot,runTransaction,collection,getDocs} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getFirestore,doc,setDoc,getDoc,onSnapshot,runTransaction,collection,getDocs,serverTimestamp as firestoreServerTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 const firebaseConfig={apiKey:"AIzaSyAautN2cGfEco5KvR0iPzgftSgpiqr3pUw", authDomain:"molkky-998f1.firebaseapp.com", projectId:"molkky-998f1", storageBucket:"molkky-998f1.firebasestorage.app", messagingSenderId:"815701794917", appId:"1:815701794917:web:8c4271e83d153f2bb1268c"};
 const db=getFirestore(initializeApp(firebaseConfig));
+const FIRESTORE_DOCUMENT_LIMIT=1024*1024;
+const MAX_APP_DOCUMENT_BYTES=800*1024;
+const capacityTimestampValues=new WeakSet();
+function serverTimestamp(){
+  const value=firestoreServerTimestamp();capacityTimestampValues.add(value);return value;
+}
+function capacityStringBytes(value){return new TextEncoder().encode(String(value)).length+1;}
+function firestoreDocumentBytes(path,data){
+  const nameBytes=String(path).split('/').reduce((sum,part)=>sum+capacityStringBytes(part),16);
+  return nameBytes+firestoreMapBytes(data);
+}
+function firestoreMapBytes(value){
+  let bytes=32;
+  for(const [key,entry] of Object.entries(value))bytes+=capacityStringBytes(key)+firestoreValueBytes(entry);
+  return bytes;
+}
+function firestoreValueBytes(value){
+  if(value===null)return 1;
+  if(typeof value==='number')return 8;
+  if(typeof value==='boolean')return 1;
+  if(typeof value==='string')return capacityStringBytes(value);
+  if(typeof value!=='object')throw Error("容量を計算できない値があります。保存データの形式を確認してください。");
+  if(capacityTimestampValues.has(value))return 8;
+  if(Object.prototype.toString.call(value)==='[object Date]')return 8;
+  if(typeof value.toMillis==='function'&&Number.isFinite(value.seconds))return 8;
+  if(Array.isArray(value))return value.reduce((sum,entry)=>sum+firestoreValueBytes(entry),0);
+  if(Object.prototype.toString.call(value)==='[object Uint8Array]')return value.byteLength;
+  if(typeof value.toUint8Array==='function')return value.toUint8Array().byteLength;
+  if(typeof value.withConverter==='function'&&typeof value.path==='string')return value.path.split('/').reduce((sum,part)=>sum+capacityStringBytes(part),16);
+  if(typeof value.isEqual==='function'&&Number.isFinite(value.latitude)&&Number.isFinite(value.longitude))return 16;
+  if(Object.prototype.toString.call(value)==='[object Object]')return firestoreMapBytes(value);
+  throw Error("対応していないデータ型のため容量を確認できません。");
+}
+function assertCapacityBytes(path,bytes,previousBytes=null){
+  const nonGrowing=Number.isFinite(previousBytes)&&bytes<=previousBytes&&bytes<FIRESTORE_DOCUMENT_LIMIT;
+  if(bytes>MAX_APP_DOCUMENT_BYTES&&!nonGrowing){
+    const error=Error(`${path.startsWith('history/')?'保存済み成績':'この部屋'}の推定容量が${(bytes/1024).toFixed(1)} KiBとなり、アプリの保存上限800 KiBを超えます。履歴は削除していません。新しい部屋へ分けてください。`);
+    error.code='capacity-limit';error.estimatedBytes=bytes;throw error;
+  }
+  return bytes;
+}
+function assertFirestoreCapacity(path,next,previousBytes=null){
+  return assertCapacityBytes(path,firestoreDocumentBytes(path,next),previousBytes);
+}
+function firestoreCapacityProfile(path,current){
+  const fields=new Map(Object.entries(current).map(([key,value])=>[key,capacityStringBytes(key)+firestoreValueBytes(value)]));
+  const bytes=String(path).split('/').reduce((sum,part)=>sum+capacityStringBytes(part),16)+32+[...fields.values()].reduce((sum,value)=>sum+value,0);
+  return {bytes,fields};
+}
+function capacityUpdate(tx,ref,current,patch,before=null){
+  const path=ref.path||'rooms/'+room;
+  const profile=before||firestoreCapacityProfile(path,current);
+  let bytes=profile.bytes;
+  for(const [key,value] of Object.entries(patch))bytes+=capacityStringBytes(key)+firestoreValueBytes(value)-(profile.fields.get(key)||0);
+  assertCapacityBytes(path,bytes,profile.bytes);
+  tx.update(ref,patch);
+}
+function capacitySet(tx,ref,value,path,previous=null){
+  const target=ref.path||path;
+  assertFirestoreCapacity(target,value,previous?firestoreDocumentBytes(target,previous):null);
+  tx.set(ref,value);
+}
+function updateRoomCapacity(){
+  const element=$("room-capacity-status");if(!element)return;
+  if(!room||!data){element.textContent="";return;}
+  try{
+    const bytes=firestoreDocumentBytes('rooms/'+room,data),warning=bytes>MAX_APP_DOCUMENT_BYTES?'保存上限超過（容量が増える変更は停止）':bytes>=750*1024?'残り容量が少なくなっています':bytes>=600*1024?'容量に注意してください':'';
+    element.textContent=`部屋のFirestore推定容量：${(bytes/1024).toFixed(1)} / 1024 KiB（${(bytes/FIRESTORE_DOCUMENT_LIMIT*100).toFixed(1)}%）。アプリの保存上限800 KiB。`+(warning?' '+warning+'。履歴を保存し、次のセットは新しい部屋で作成してください。':'');
+    element.style.color=bytes>=750*1024?'#b42318':bytes>=600*1024?'#a15c00':'#555';
+  }catch(error){element.textContent="部屋の容量を確認できません："+error.message;element.style.color='#b42318';}
+}
+
 let matchTimerInterval = null;
 let timerSeconds = 0;
 let isTimerRunning = false;
 
+function replayCacheLookup(cache,sides,throws,start,isTeam,missRule,overRule,sideOrder){
+  const values=Array.isArray(throws)?throws:[],n=sides.length;
+  const order=Array.isArray(sideOrder)&&sideOrder.length===n&&new Set(sideOrder).size===n&&sideOrder.every(i=>Number.isInteger(i)&&i>=0&&i<n)?sideOrder:Array.from({length:n},(_,i)=>i);
+  let hash=2166136261;
+  for(const value of values)hash=Math.imul(hash^(Number(value)||0),16777619)>>>0;
+  // replayは名前ではなく人数・投球順・規則に従って状態を計算する。
+  const key=JSON.stringify([sides.map(side=>side.players.length),values.length,hash,start||0,!!isTeam,missRule||"out",overRule||"25",order]);
+  const bucket=cache.get(key);
+  // ハッシュ一致だけでは採用せず、投球列を厳密照合する。同数の訂正・衝突も区別。
+  const hit=bucket?.find(entry=>entry.throws.length===values.length&&entry.throws.every((value,i)=>Object.is(value,values[i])));
+  return {key,result:hit?.result,hit:!!hit,values};
+}
+function replayCacheStore(cache,lookup,result){
+  if((cache.replayEntries||0)>=256){cache.clear();cache.replayEntries=0;}
+  const bucket=cache.get(lookup.key)||[];
+  const compact=lookup.values.every(value=>Number.isInteger(value)&&value>=0&&value<=12&&!Object.is(value,-0));
+  bucket.push({throws:compact?Uint8Array.from(lookup.values):Array.from(lookup.values),result});cache.set(lookup.key,bucket);
+  cache.replayEntries=(cache.replayEntries||0)+1;
+}
+
 function replay(sides,throws,start,isTeam,missRule,overRule,sideOrder,onThrow){
   const cache=!onThrow&&replay.renderCache;
-  const cacheKey=cache?JSON.stringify([sides,throws,start,isTeam,missRule,overRule,sideOrder]):null;
-  if(cache&&cache.has(cacheKey))return cache.get(cacheKey);
+  const lookup=cache?replayCacheLookup(cache,sides,throws,start,isTeam,missRule,overRule,sideOrder):null;
+  if(lookup?.hit)return lookup.result;
   const n=sides.length;
   const order=Array.isArray(sideOrder)&&sideOrder.length===n&&new Set(sideOrder).size===n&&sideOrder.every(i=>Number.isInteger(i)&&i>=0&&i<n)?sideOrder:Array.from({length:n},(_,i)=>i);
   const following=(current,offset)=>order[(order.indexOf(current)+offset)%n];
@@ -370,7 +465,7 @@ function replay(sides,throws,start,isTeam,missRule,overRule,sideOrder,onThrow){
     turn=following(turn,1);who=normalizeTurn();
   }
   const result={st,turn,winner,who:winner===null?who:null};
-  if(cache)cache.set(cacheKey,result);
+  if(cache)replayCacheStore(cache,lookup,result);
   return result;
 }
 
@@ -452,7 +547,7 @@ async function claimPlayerSession(release=false){
         if(sessions.some(item=>item.name===name))return false;
         sessions.push({id:inputSessionId,name,expires:Date.now()+INPUT_LEASE_MS});
       }
-      tx.update(ref,{playerSessions:sessions});return true;
+      capacityUpdate(tx,ref,snap.data(),{playerSessions:sessions});return true;
     });
   } finally {playerSessionBusy=false;}
 }
@@ -553,7 +648,7 @@ async function changeInputLease(acquire){
         if(!name||!hasPlayerSession(snap.data())||leases.length>=2)return false;
         leases.push({id:inputSessionId,name,expires:Date.now()+INPUT_LEASE_MS});
       }
-      tx.update(ref,{inputLeases:leases});
+      capacityUpdate(tx,ref,snap.data(),{inputLeases:leases});
       return true;
     });
   } finally {inputLeaseBusy=false;}
@@ -598,14 +693,63 @@ function loadHomeMemberSelection(){
   }
 }
 let homeMemberSelection=loadHomeMemberSelection();
+const HOME_USAGE_KEY="molkky_home_member_usage_v1";
+function loadHomeUsage(){
+  const usage=new Map(),now=Date.now();
+  try{
+    const raw=localStorage.getItem(HOME_USAGE_KEY),saved=raw===null?[]:JSON.parse(raw);
+    if(!Array.isArray(saved))throw Error("invalid usage");
+    for(const entry of saved){
+      if(!entry||typeof entry.name!=="string"||!homeMembersList.includes(entry.name))continue;
+      const addedAt=Number.isSafeInteger(entry.addedAt)&&entry.addedAt>0&&entry.addedAt<=now?entry.addedAt:now;
+      const lastUsedAt=Number.isSafeInteger(entry.lastUsedAt)&&entry.lastUsedAt>0&&entry.lastUsedAt<=now?entry.lastUsedAt:null;
+      usage.set(entry.name,{name:entry.name,addedAt,lastUsedAt});
+    }
+  }catch(error){homeMembersStatus+=(homeMembersStatus?" ":"")+"利用日時を読み込めないため、候補を削除せず利用日時を初期化しました。";}
+  for(const name of homeMembersList)if(!usage.has(name))usage.set(name,{name,addedAt:now,lastUsedAt:null});
+  return usage;
+}
+let homeMemberUsage=loadHomeUsage();
+function syncHomeUsage(){
+  for(const name of homeMemberUsage.keys())if(!homeMembersList.includes(name))homeMemberUsage.delete(name);
+  for(const name of homeMembersList)if(!homeMemberUsage.has(name))homeMemberUsage.set(name,{name,addedAt:Date.now(),lastUsedAt:null});
+}
+function rememberHomeUsage(names){
+  syncHomeUsage();const now=Date.now();let changed=false;
+  for(const name of names||[])if(homeMemberUsage.has(name)){const entry=homeMemberUsage.get(name);if(entry.lastUsedAt!==now){entry.lastUsedAt=now;changed=true;}}
+  if(changed){saveHomeMembers();renderHomeMembers();}
+}
+function homeUsageLabel(name){
+  const used=homeMemberUsage.get(name)?.lastUsedAt;
+  return used?"最終利用："+new Date(used).toLocaleDateString("ja-JP",{timeZone:"Asia/Tokyo"}):"最終利用：未利用（日時管理開始後）";
+}
+function unusedHomeCandidates(days){
+  if(![90,180,365].includes(days))return [];
+  const cutoff=Date.now()-days*86400000,current=new Set(data?.players||[]);
+  return homeMembersList.filter(name=>{
+    const usage=homeMemberUsage.get(name);
+    return !isFixedHomeMember(name)&&!homeMemberSelection.has(name)&&!current.has(name)&&!!usage&&(usage.lastUsedAt||usage.addedAt)<cutoff;
+  });
+}
+function cleanupHomeMembers(){
+  captureHomeMemberSelection();const days=Number($("home-cleanup-days").value),names=unusedHomeCandidates(days);
+  if(!names.length){alert("整理対象はありません。固定8名、参加チェック中、現在の部屋の参加者は除外します。");return false;}
+  if(!confirm(`${days}日以上利用のない追加候補 ${names.length}名を、この端末の候補から削除します。部屋・過去成績は変更しません。\n\n${names.join("、")}`))return false;
+  const removed=new Set(names);homeMembersList=homeMembersList.filter(name=>!removed.has(name));
+  names.forEach(name=>{homeMemberSelection.delete(name);homeMemberUsage.delete(name);});
+  saveHomeMembers();renderHomeMembers();return true;
+}
+
 function saveHomeMembers(){
+  syncHomeUsage();
   try{
     localStorage.setItem(HOME_MEMBERS_KEY,JSON.stringify(homeMembersList));
     localStorage.setItem(HOME_SELECTION_KEY,JSON.stringify([...homeMemberSelection]));
+    localStorage.setItem(HOME_USAGE_KEY,JSON.stringify([...homeMemberUsage.values()]));
     homeMembersStatus="この端末に保存しました。";
     return true;
   }catch(error){
-    homeMembersStatus="候補一覧・参加チェックを保存できませんでした。この画面では変更されていますが、再読み込みすると戻る可能性があります。";
+    homeMembersStatus="候補一覧・参加チェック・利用日時を保存できませんでした。この画面では変更されていますが、再読み込みすると戻る可能性があります。";
     return false;
   }
 }
@@ -616,7 +760,7 @@ function renderHomeMembers(){
   const container=$("home-players-container");if(!container)return;
   container.innerHTML=homeMembersList.map((name,index)=>{
     const actions=isFixedHomeMember(name)?"":`<button type="button" class="sub" data-home-action="rename" data-home-index="${index}" aria-label="${esc(name)}の候補名を変更">変更</button><button type="button" class="sub" data-home-action="remove" data-home-index="${index}" aria-label="${esc(name)}を候補から削除">×</button>`;
-    return `<div class="home-member-chip"><label><input type="checkbox" class="home-member-chk" value="${esc(name)}" ${homeMemberSelection.has(name)?"checked":""} style="margin:0;width:18px;height:18px">${esc(name)}</label>${actions}</div>`;
+    return `<div class="home-member-chip"><label><input type="checkbox" class="home-member-chk" value="${esc(name)}" ${homeMemberSelection.has(name)?"checked":""} style="margin:0;width:18px;height:18px">${esc(name)}</label>${isFixedHomeMember(name)?"":`<span class="pl">${esc(homeUsageLabel(name))}</span>`}${actions}</div>`;
   }).join("");
   $("home-members-status").textContent=homeMembersStatus;
 }
@@ -632,6 +776,7 @@ function rememberRoomMemberAtHome(name){
   captureHomeMemberSelection();
   if(!homeMembersList.includes(name))homeMembersList.push(name);
   homeMemberSelection.add(name);
+  syncHomeUsage();homeMemberUsage.get(name).lastUsedAt=Date.now();
   const saved=saveHomeMembers();renderHomeMembers();return saved;
 }
 function renameHomeMember(index,name){
@@ -643,6 +788,7 @@ function renameHomeMember(index,name){
   if(homeMembersList.includes(next)){alert("同じ名前が候補に登録されています。");return false;}
   captureHomeMemberSelection();homeMembersList[index]=next;
   if(homeMemberSelection.delete(previous))homeMemberSelection.add(next);
+  if(homeMemberUsage.has(previous)){const entry=homeMemberUsage.get(previous);homeMemberUsage.delete(previous);homeMemberUsage.set(next,{...entry,name:next});}
   saveHomeMembers();renderHomeMembers();return true;
 }
 function removeHomeMember(index){
@@ -668,6 +814,7 @@ $("home-players-container").onchange=event=>{
   $("home-members-status").textContent=homeMembersStatus;
 };
 $("add-home-member").onclick=addHomeMember;
+$("home-cleanup").onclick=cleanupHomeMembers;
 renderHomeMembers();
 
 function isTeamSet(type){return type==="team"||type==="team_league"||type==="team_tournament";}
@@ -1768,6 +1915,7 @@ function getSoloSides(){
 }
 
 $("create").onclick=async()=>{
+  try{
   const checkedBoxes = document.querySelectorAll(".home-member-chk:checked");
   const players = [...checkedBoxes].map(chk => chk.value.trim()).filter(Boolean);
   if(players.length < 2){alert("参加者を2人以上選択してください");return;}
@@ -1779,13 +1927,15 @@ $("create").onclick=async()=>{
       const roomRef = doc(db, "rooms", candidate);
       const existing = await tx.get(roomRef);
       if(existing.exists()) return false;
-      tx.set(roomRef, {players, sets:[], pass, created:Date.now()});
+      capacitySet(tx,roomRef,{players,sets:[],pass,created:Date.now()},"rooms/"+candidate);
       return true;
     });
     if(created) code = candidate;
   }
   if(!code) { alert("部屋コードを発行できませんでした。もう一度お試しください。"); return; }
+  rememberHomeUsage(players);
   enter(code);
+  }catch(error){alert("部屋を作成できませんでした："+(error.message||"通信状態を確認してください。"));return false;}
 };
 
 $("join").onclick=async()=>{
@@ -1800,7 +1950,12 @@ $("join").onclick=async()=>{
   enter(c);
 };
 
-$("leave").onclick=async()=>{try{await changeInputLease(false);await claimPlayerSession(true);}catch(error){console.warn(error);}roomSubscriptionGeneration++;if(unsub)unsub();location.hash="";location.reload();};
+$("leave").onclick=async()=>{
+  if(historyBusy){alert("成績を保存中です。保存結果を確認してから退出してください。");return;}
+  if(historyLeaving)return;
+  historyLeaving=true;
+  try{try{await changeInputLease(false);await claimPlayerSession(true);}catch(error){console.warn(error);}roomSubscriptionGeneration++;if(unsub)unsub();location.hash="";location.reload();}finally{historyLeaving=false;}
+};
 if(location.hash.length>1)enter(location.hash.slice(1));
 
 function enter(code){
@@ -1828,7 +1983,7 @@ function reconnectRoom(){
       }
       recoverSkippedActiveMatch(d);
       if(!snapshot.metadata?.fromCache&&!snapshot.metadata?.hasPendingWrites){roomSyncBlocked=false;roomSyncError="";}
-      if(firstSnap){firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";queueMicrotask(()=>activatePlayer());}
+      if(firstSnap){rememberHomeUsage(d.players);firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";queueMicrotask(()=>activatePlayer());}
       else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderHidden=false;}
       if(cur>=d.sets.length)cur=d.sets.length-1;
       if(cur<0&&view==="set")view="new";
@@ -1837,7 +1992,7 @@ function reconnectRoom(){
   }catch(error){failed(error);return false;}
   return true;
 }
-$("reconnect-room").onclick=()=>reconnectRoom();
+$("reconnect-room").onclick=()=>{const result=reconnectRoom();if(result)retryHistoryWatch();return result;};
 
 $("restrict-my-turn").onchange = async () => {
   const acquire=!$("restrict-my-turn").checked;
@@ -1848,7 +2003,6 @@ $("restrict-my-turn").onchange = async () => {
   render();
 };
 
-const MAX_ROOM_SERIALIZED_BYTES=800*1024;
 function applyNextMatchScoreOrder(d,beforeIndices){
   for(const set of d.sets){
     if(set.archived)continue;
@@ -1876,6 +2030,7 @@ async function mutate(fn){
     const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
     if(!hasPlayerSession(d)){alert("この名前の利用権限がありません。名前を選び直してください。");return;}
     recoverSkippedActiveMatch(d);
+    const beforeCapacityProfile=firestoreCapacityProfile(ref.path||"rooms/"+room,d);
     const beforeIndices=new Map(d.sets.map(set=>[set.id,set.activeMatchIndex||0]));
     const protectedSets=new Map(d.sets.filter(set=>set.archived).map(set=>[set.id,JSON.stringify(set)]));
     if(fn(d)===false)return;
@@ -1887,13 +2042,12 @@ async function mutate(fn){
     for(const set of d.sets.filter(set=>!set.archived))for(const match of set.matches){
       if(Array.isArray(match.gameOrders))match.gameOrders=Object.fromEntries(Object.entries(match.gameOrders).filter(([,order])=>Array.isArray(order)));
     }
-    const serialized=JSON.stringify(d);
-    const byteLength=new TextEncoder().encode(serialized).length;
-    if(byteLength>MAX_ROOM_SERIALIZED_BYTES){sizeLimitExceeded=true;return;}
-    tx.update(ref,{players:d.players,sets:d.sets});
+    const timersChanged=settleSharedTimers(d);
+    try{capacityUpdate(tx,ref,d,{players:d.players,sets:d.sets,...(timersChanged?{sharedTimers:d.sharedTimers}:{})},beforeCapacityProfile);}
+    catch(error){if(error.code==='capacity-limit'){sizeLimitExceeded=error.message;return;}throw error;}
     return true;
   });
-  if(sizeLimitExceeded)alert("この部屋の保存データが大きくなったため、変更を保存できません。新しい部屋を作成して続けてください。");
+  if(sizeLimitExceeded)alert(sizeLimitExceeded);
   return saved===true;
 }
 
@@ -2461,8 +2615,6 @@ async function proceedToNextStep(customSides) {
   const expectedGame=set.matches[expectedIndex].currentGameIndex||0;
   const expectedMatch=nextStepToken(set);
   stopTimer();
-  timerSeconds = 0;
-  updateTimerDisplay();
   await mutate(d=>{
     const s=findSet(d,sid);
     if(!s)return false;
@@ -2720,7 +2872,7 @@ function roomCreatedDate(roomData){
 $("copystats").onclick=async()=>{
   const rows=[["部屋コード",room||"不明"],["日付（部屋作成日・日本時間）",roomCreatedDate(data)],[],["名前","ゲーム数","勝","勝率","セット優勝","投球数","総得点","平均点/投","0点回数","0点率"]];
   tally(data).forEach(t=>rows.push([t.name,t.played,t.win,t.played?(t.win/t.played).toFixed(3):"",t.setWin,t.n,t.pts,t.n?(t.pts/t.n).toFixed(2):"",t.zero,t.n?(t.zero/t.n*100).toFixed(1)+"%":""]));
-  const txt=rows.map(r=>r.join("\t")).join("\n");
+  const txt=rows.map(r=>r.map(historyTSVCell).join("\t")).join("\n");
   try{await navigator.clipboard.writeText(txt);alert("コピーしました。Excelに貼り付けてください。");}
   catch(e){prompt("コピーして Excel に貼り付けてください",txt);}
 };
@@ -2734,52 +2886,107 @@ document.getElementById("tabs").onclick=e=>{
 
 const MODE={fixed:"勝利数で決定",first:"先取り",total:"合計得点で決定"};
 
-$("timer-start-btn").onclick = () => {
-  if (isTimerRunning) {
-    stopTimer();
-    $("timer-start-btn").textContent = "スタート";
-    $("timer-start-btn").style.background = "#3b6ea8";
-  } else {
-    startTimer();
-    $("timer-start-btn").textContent = "一時停止";
-    $("timer-start-btn").style.background = "#888";
+let sharedTimerBusy=false;
+function timerMillis(value){
+  if(typeof value?.toMillis==="function")return value.toMillis();
+  if(Number.isFinite(value?.seconds))return value.seconds*1000+(value.nanoseconds||0)/1000000;
+  return Number.isFinite(value)?value:null;
+}
+function sharedTimerTarget(set,mi=set.activeMatchIndex||0,gi=set.matches[mi]?.currentGameIndex||0){
+  const match=set.matches[mi];if(!match)return null;
+  const participants=(match.customSides||match.sides||[]).filter(Boolean).map(side=>[side.name,[...side.players].sort()]).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
+  return {key:JSON.stringify([String(set.id),mi,gi]),sid:String(set.id),mi,gi,participants:JSON.stringify(participants)};
+}
+function sharedTimerValue(d,target){
+  const record=d?.sharedTimers?.[target?.key];
+  return record&&record.participants===target.participants?record:null;
+}
+function sharedTimerElapsed(record,now=Date.now()){
+  if(!record)return 0;
+  const base=Number.isFinite(record.elapsedMs)?Math.max(0,record.elapsedMs):0,start=timerMillis(record.matchStartedAt),end=record.running?now:timerMillis(record.pausedAt);
+  return base+(start!==null&&end!==null?Math.max(0,end-start):0);
+}
+function sharedTimerFinished(set,target){
+  const match=set.matches[target.mi];if(!match||match.skipped||set.archived)return true;
+  const sides=match.customSides||match.sides;
+  if(!sides?.length||sides.some(side=>!side))return true;
+  return replay(sides,getGameThrows(match,target.gi),getGameStart(match,target.gi),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,target.gi)).winner!==null;
+}
+function settleSharedTimers(d){
+  let changed=false;
+  for(const [key,record] of Object.entries(d.sharedTimers||{})){
+    if(!record.running)continue;
+    const set=d.sets.find(item=>String(item.id)===record.sid),target=set&&sharedTimerTarget(set,record.mi,record.gi);
+    if(!set||!target||(set.activeMatchIndex||0)!==record.mi||(set.matches[record.mi]?.currentGameIndex||0)!==record.gi||record.participants!==target.participants||sharedTimerFinished(set,target)){
+      d.sharedTimers[key]={...record,running:false,pausedAt:serverTimestamp(),revision:(record.revision||0)+1};changed=true;
+    }
   }
-};
-
-$("timer-reset-btn").onclick = () => {
-  stopTimer();
-  timerSeconds = 0;
-  updateTimerDisplay();
-  $("timer-start-btn").textContent = "スタート";
-  $("timer-start-btn").style.background = "#3b6ea8";
-};
-
-function startTimer() {
-  if (matchTimerInterval) clearInterval(matchTimerInterval);
-  isTimerRunning = true;
-  matchTimerInterval = setInterval(() => {
-    timerSeconds++;
-    updateTimerDisplay();
-  }, 1000);
+  return changed;
 }
-
-function stopTimer() {
-  if (matchTimerInterval) {
-    clearInterval(matchTimerInterval);
-    matchTimerInterval = null;
-  }
-  isTimerRunning = false;
+async function changeSharedTimer(action){
+  if(sharedTimerBusy)return false;
+  if(!currentPlayer||roomSyncBlocked){alert("タイマー操作には参加者の選択と接続が必要です。");return false;}
+  const set=data.sets[cur],target=set&&sharedTimerTarget(set);if(!target)return false;
+  const code=room,expected=sharedTimerValue(data,target)?.revision||0;
+  sharedTimerBusy=true;syncSharedTimerDisplay();
+  try{
+    await runTransaction(db,async tx=>{
+      const ref=doc(db,"rooms",code),snapshot=await tx.get(ref);
+      if(!snapshot.exists())throw Error("部屋が見つかりません。");
+      const latest=snapshot.data(),actualSet=latest.sets.find(item=>String(item.id)===target.sid);
+      if(room!==code||!hasPlayerSession(latest))throw Error("参加者の利用権限を確認してください。");
+      if(!actualSet||(actualSet.activeMatchIndex||0)!==target.mi||(actualSet.matches[target.mi]?.currentGameIndex||0)!==target.gi)throw Error("ゲームが切り替わりました。");
+      const actualTarget=sharedTimerTarget(actualSet);
+      if(actualTarget.participants!==target.participants||sharedTimerFinished(actualSet,actualTarget))throw Error("終了・変更されたゲームのタイマーは操作できません。");
+      const old=sharedTimerValue(latest,target);
+      if((old?.revision||0)!==expected)throw Error("別の端末でタイマーが操作されました。表示を確認してください。");
+      let next={sid:target.sid,mi:target.mi,gi:target.gi,participants:target.participants,revision:expected+1,elapsedMs:0,running:false,matchStartedAt:null,pausedAt:null};
+      if(action==="start"){
+        if(old?.running)throw Error("タイマーはすでに動いています。");
+        next={...next,running:true,elapsedMs:sharedTimerElapsed(old),matchStartedAt:serverTimestamp()};
+      }else if(action==="pause"){
+        if(!old?.running)throw Error("タイマーはすでに停止しています。");
+        next={...old,running:false,pausedAt:serverTimestamp(),revision:expected+1};
+      }else if(action!=="reset")throw Error("タイマー操作が不正です。");
+      const sharedTimers={...(latest.sharedTimers||{}),[target.key]:next};
+      capacityUpdate(tx,ref,latest,{sharedTimers});
+    });
+    return true;
+  }catch(error){alert("タイマーを変更できませんでした："+(error.message||"通信状態を確認してください。"));return false;}
+  finally{sharedTimerBusy=false;syncSharedTimerDisplay();}
 }
-
-function updateTimerDisplay() {
-  const timerElem = $("match-timer-display");
-  if (!timerElem) return;
-  const mins = Math.floor(timerSeconds / 60).toString().padStart(2, '0');
-  const secs = (timerSeconds % 60).toString().padStart(2, '0');
-  timerElem.textContent = `⏱️ ${mins}:${secs}`;
+function syncSharedTimerDisplay(){
+  if(view!=="set"||!data?.sets[cur])return;
+  const set=data.sets[cur],target=sharedTimerTarget(set),record=sharedTimerValue(data,target);
+  const running=!!record?.running,elapsed=sharedTimerElapsed(record);
+  timerSeconds=Math.floor(elapsed/1000);isTimerRunning=running;updateTimerDisplay();
+  $("timer-start-btn").textContent=running?"一時停止":"スタート";
+  $("timer-start-btn").style.background=running?"#888":"#3b6ea8";
+  const disabled=sharedTimerBusy||roomSyncBlocked||!currentPlayer||!hasPlayerSession(data)||!target||sharedTimerFinished(set,target);
+  $("timer-start-btn").disabled=disabled;$("timer-reset-btn").disabled=disabled;
 }
+function startTimer(){
+  if(matchTimerInterval)clearInterval(matchTimerInterval);
+  matchTimerInterval=null;syncSharedTimerDisplay();
+  if(isTimerRunning)matchTimerInterval=setInterval(()=>{
+    if(view!=="set"||!data?.sets[cur])return;
+    const target=sharedTimerTarget(data.sets[cur]),record=sharedTimerValue(data,target);
+    timerSeconds=Math.floor(sharedTimerElapsed(record)/1000);updateTimerDisplay();
+  },250);
+}
+function stopTimer(){
+  if(matchTimerInterval)clearInterval(matchTimerInterval);
+  matchTimerInterval=null;isTimerRunning=false;
+}
+function updateTimerDisplay(){
+  const element=$("match-timer-display");if(!element)return;
+  element.textContent=`⏱️ ${Math.floor(timerSeconds/60).toString().padStart(2,"0")}:${(timerSeconds%60).toString().padStart(2,"0")}`;
+}
+$("timer-start-btn").onclick=()=>changeSharedTimer(isTimerRunning?"pause":"start");
+$("timer-reset-btn").onclick=()=>changeSharedTimer("reset");
 
 function render(){
+  updateRoomCapacity();
   if(view!=="stats"&&historyWatchKey)stopHistoryWatch();
   const previousCache=replay.renderCache;
   replay.renderCache=new Map();
@@ -3277,6 +3484,7 @@ function renderSet(set){
 
   setHTMLIfChanged($("log"),getThrowLogHTML(set,m,gIdx,throwsList,selectedThrow?.index));
   updateScoreSaveUI();
+  startTimer();
 }
 
 function renderStats(){
@@ -3290,6 +3498,63 @@ function renderStats(){
     T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.pts}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td><td>${t.n?(t.zero/t.n*100).toFixed(1)+"%":"-"}</td></tr>`).join("")+"</table>"+
     "<p class='pl'>「ゲーム数」は決着したゲームの参加数、「勝」はそのうち勝利したゲーム数です。中断保存したセットは決着済みゲームだけを集計し、セット優勝には加算しません。総得点は集計対象の投球で獲得した得点の合計、平均点は1投あたりの得点です。0点率は0点回数÷投球数の割合です。</p>";
 
+}
+let historyRenderError="",historyLeaving=false;
+function historyTSVCell(value){
+  const cell=String(value??"").replace(/[\t\r\n]/g," ");
+  return /^\s*[=+\-@]/.test(cell)?"'"+cell:cell;
+}
+function historySavedTime(value){
+  if(!Number.isSafeInteger(value)||value<=0||!Number.isFinite(new Date(value).getTime()))return "不明";
+  return new Date(value).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo",hour12:false});
+}
+function updateHistorySavedTime(){
+  $("history-last-saved").textContent=room==="9999"?"最終保存：対象外（テスト部屋）":historyWatchError?"最終保存：確認できません":!historyWatchKnown&&!historyWatchRecord?"最終保存：確認中":historyWatchRecord?"最終保存："+historySavedTime(historyWatchRecord.updatedAt)+"（日本時間）"+(!historyWatchKnown?"・最新未確認":""):"最終保存：まだ保存されていません";
+}
+function retryHistoryWatch(){
+  if(view==="stats"&&data){ensureHistoryWatch(true);refreshHistorySetList();}
+}
+function historyBeforeUnload(event){
+  if(!historyBusy)return;
+  event.preventDefault();event.returnValue="";return "";
+}
+window.addEventListener?.("beforeunload",historyBeforeUnload);
+function validateHistoryRecords(records){
+  for(const record of records){
+    if(!record||record.schema!==1||!/^\d{4}$/.test(record.roomCode)||!historyDay(record.playedAt)||!Number.isSafeInteger(record.created)||record.created<=0||!Array.isArray(record.entries)||record.entries.length>500)throw Error("保存された記録の形式を確認してください。");
+    const ids=new Set();
+    for(const entry of record.entries){
+      if(!entry||typeof entry.id!=="string"||!entry.id||ids.has(entry.id)||!Array.isArray(entry.rows))throw Error("保存されたセットの形式・重複を確認してください。");
+      ids.add(entry.id);const names=new Set();
+      for(const row of entry.rows){
+        if(!row||typeof row.name!=="string"||!row.name||names.has(row.name)||HISTORY_FIELDS.some(field=>!Number.isSafeInteger(row[field])||row[field]<0)||row.win>row.played||row.zero>row.n)throw Error("保存された成績の形式を確認してください。");
+        names.add(row.name);
+      }
+    }
+  }
+}
+function historyRecordComparable(record){
+  const {updatedAt,...content}=record;
+  return JSON.stringify(historyStable(content));
+}
+// Web Cryptoのない環境でも同じSHA-256を計算し、保存機能を維持する。
+function historySHA256(bytes){
+  const k=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const size=Math.ceil((bytes.length+9)/64)*64,dataBytes=new Uint8Array(size);dataBytes.set(bytes);dataBytes[bytes.length]=0x80;
+  const view=new DataView(dataBytes.buffer),bits=bytes.length*8;view.setUint32(size-8,Math.floor(bits/0x100000000));view.setUint32(size-4,bits>>>0);
+  const h=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19],w=new Uint32Array(64),rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+  for(let offset=0;offset<size;offset+=64){
+    for(let i=0;i<16;i++)w[i]=view.getUint32(offset+i*4);
+    for(let i=16;i<64;i++){const x=w[i-15],y=w[i-2];w[i]=(w[i-16]+(rotr(x,7)^rotr(x,18)^(x>>>3))+w[i-7]+(rotr(y,17)^rotr(y,19)^(y>>>10)))>>>0;}
+    let [a,b,c,d,e,f,g,j]=h;
+    for(let i=0;i<64;i++){const t1=(j+(rotr(e,6)^rotr(e,11)^rotr(e,25))+((e&f)^(~e&g))+k[i]+w[i])>>>0,t2=((rotr(a,2)^rotr(a,13)^rotr(a,22))+((a&b)^(a&c)^(b&c)))>>>0;j=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}
+    [a,b,c,d,e,f,g,j].forEach((value,i)=>h[i]=(h[i]+value)>>>0);
+  }
+  return h.map(value=>value.toString(16).padStart(8,"0")).join("");
+}
+
+function updateHistoryReadStatus(){
+  $("history-read-status").textContent=historyLoading?"保存記録を読み込み中…（表示中の表は前回読込分です）":historyLoadError?historyLoadError+" 表は前回読込分です。コピーは再読込成功後に行ってください。":historyRenderError?"表示できません："+historyRenderError:historyLoaded?(historyFromCache?"キャッシュ表示（最新未確認）":"読込完了")+`：${historyRows.length}部屋分。9999は除外。最新の記録を見るには再読込してください。`:"保存記録を読み込んでください。";
 }
 // 保存状態の監視は通算成績画面の間だけ。毎投の保存は行わない。
 let historyWatchKey="",historyWatchStop=null,historyWatchEpoch=0,historyWatchKnown=false,historyWatchError="",historyWatchRecord=null;
@@ -3309,20 +3574,26 @@ async function historyFingerprint(set){
     for(const key of Object.keys(match))if(/^game\d+$/.test(key)&&Array.isArray(match[key])&&!match[key].length)delete match[key];
   }
   const bytes=new TextEncoder().encode(JSON.stringify(historyStable(normalized)));
-  const hash=await crypto.subtle.digest("SHA-256",bytes);
-  return Array.from(new Uint8Array(hash),value=>value.toString(16).padStart(2,"0")).join("");
+  try{
+    if(typeof crypto!=="undefined"&&crypto.subtle?.digest){
+      const hash=await crypto.subtle.digest("SHA-256",bytes);
+      return Array.from(new Uint8Array(hash),value=>value.toString(16).padStart(2,"0")).join("");
+    }
+  }catch(error){/* 利用制限がある環境では同じSHA-256をJSで計算する。 */}
+  return historySHA256(bytes);
 }
 function stopHistoryWatch(){
   if(historyWatchStop)historyWatchStop();
   historyWatchStop=null;historyWatchKey="";historyWatchEpoch++;historyStatusEpoch++;
   historyWatchKnown=false;historyWatchError="";historyWatchRecord=null;historyStatusSignature="";historyLabels=new Map();
 }
-function ensureHistoryWatch(){
+function ensureHistoryWatch(force=false){
   let key;
   try{key=historyRoomKey(room,data);}catch(error){historyWatchError=error.message;return;}
-  if(key===historyWatchKey)return;
+  if(key===historyWatchKey&&!force)return;
   stopHistoryWatch();historyWatchKey=key;
-  if(room==="9999"){historyWatchKnown=true;return;}
+  if(room==="9999"){historyWatchKnown=true;updateHistorySavedTime();return;}
+  updateHistorySavedTime();
   const epoch=historyWatchEpoch;
   try{
     historyWatchStop=onSnapshot(doc(db,"history",key),{includeMetadataChanges:true},snapshot=>{
@@ -3330,13 +3601,13 @@ function ensureHistoryWatch(){
       historyWatchKnown=!snapshot.metadata?.fromCache&&!snapshot.metadata?.hasPendingWrites;
       historyWatchRecord=snapshot.exists()?snapshot.data():null;historyWatchError="";
       if(historyWatchRecord&&historyDay(historyWatchRecord.playedAt)&&!$("history-day").dataset.dirty)$("history-day").value=historyWatchRecord.playedAt;
-      refreshHistorySetList();
+      updateHistorySavedTime();refreshHistorySetList();
     },error=>{
       if(epoch!==historyWatchEpoch)return;
       historyWatchKnown=false;historyWatchError="保存状態を確認できません。再接続・画面の再表示を行ってください。";
-      refreshHistorySetList();
+      updateHistorySavedTime();refreshHistorySetList();
     });
-  }catch(error){historyWatchError="保存状態を確認できません。";}
+  }catch(error){historyWatchError="保存状態を確認できません。";updateHistorySavedTime();}
 }
 function historyEntryComparable(entry){
   const {sourceFingerprint,...rest}=entry;
@@ -3399,16 +3670,19 @@ function historySelectedRows(){
   return historyTotals(historyRows,from,to);
 }
 function updateHistoryCopyButton(){
-  $("history-copy").disabled=!historyLoaded||historyLoading||!!historyLoadError;
+  const from=$("history-from").value,to=$("history-to").value;
+  const invalid=from&&!historyDay(from)||to&&!historyDay(to)||from&&to&&from>to;
+  $("history-copy").disabled=!historyLoaded||historyLoading||!!historyLoadError||!!historyRenderError||!!invalid;
 }
 async function copySimpleHistory(){
   if(!historyLoaded||historyLoading||historyLoadError){alert("保存記録を正常に読み込んでからコピーしてください。");return;}
+  if(historyRenderError){alert(historyRenderError);return;}
   try{
     const values=historySelectedRows(),from=$("history-from").value,to=$("history-to").value;
     const selected=historyRows.filter(record=>record.roomCode!=="9999"&&record.schema===1&&(!from||record.playedAt>=from)&&(!to||record.playedAt<=to));
     const rows=[["保存した記録・生涯成績"],["期間",from||"指定なし",to||"指定なし"],["読込状態",historyFromCache?"キャッシュ（最新未確認）":"サーバー確認済み"],["保存元",selected.map(record=>record.playedAt+" 部屋"+record.roomCode).join(" ／ ")],[],["名前","ゲーム数","勝","勝率","セット優勝","投球数","総得点","平均点/投","0点回数","0点率"]];
     values.forEach(value=>rows.push([value.name,value.played,value.win,value.played?(value.win/value.played*100).toFixed(1)+"%":"",value.setWin,value.n,value.pts,value.n?(value.pts/value.n).toFixed(1):"",value.zero,value.n?(value.zero/value.n*100).toFixed(1)+"%":""]));
-    const text=rows.map(row=>row.map(value=>{const cell=String(value).replace(/[\t\r\n]/g," ");return /^[=+\-@]/.test(cell)?"'"+cell:cell;}).join("\t")).join("\n");
+    const text=rows.map(row=>row.map(historyTSVCell).join("\t")).join("\n");
     try{await navigator.clipboard.writeText(text);alert("生涯・期間別成績をコピーしました。");}
     catch(error){prompt("コピーしてExcelに貼り付けてください",text);}
   }catch(error){alert(error.message);}
@@ -3445,16 +3719,16 @@ function buildHistoryRecord(code,d,old,day){
   }
   if(entries.size>500)throw Error("保存セットが500件を超えています。部屋を分けてください。");
   const result={schema:1,roomCode:code,created:d.created,playedAt:day,entries:[...entries.values()],updatedAt:Date.now()};
-  if(new TextEncoder().encode(JSON.stringify(result)).length>700*1024)throw Error("保存記録が大きすぎます。部屋を分けてください。");
   return {key,record:result};
 }
 async function saveSimpleHistory(){
   if(historyBusy)return;
+  if(historyLeaving){alert("退出処理中のため保存できません。");return;}
   if(!isAdmin()){alert("保存・更新はPIN認証済みの佐藤だけが操作できます。");return;}
   if(room==="9999"){alert("テスト部屋9999は保存対象外です。");return;}
   if(roomSyncBlocked){alert("部屋に再接続してから保存してください。");return;}
   const code=room,day=$("history-day").value,changeDay=$("history-change-day").checked;
-  historyBusy=true;$("history-save").disabled=true;$("history-status").textContent="保存中…";
+  historyBusy=true;$("history-save").disabled=true;$("leave").disabled=true;$("history-status").textContent="保存中…";
   try{
     const result=await runTransaction(db,async tx=>{
       const source=await tx.get(doc(db,"rooms",code));
@@ -3473,17 +3747,23 @@ async function saveSimpleHistory(){
       }
       const removed=(old?.entries||[]).filter(entry=>currentSets.has(entry.id)&&!record.entries.some(next=>next.id===entry.id)).length;
       const dateChange=old&&old.playedAt!==day&&record.entries.length>0;
-      if(currentCount===0&&removed===0&&!dateChange)return {written:false};
-      if(new TextEncoder().encode(JSON.stringify(record)).length>700*1024)throw Error("保存記録が大きすぎます。部屋を分けてください。");
-      tx.set(ref,record);return {written:true,record,key};
+      if(currentCount===0&&removed===0&&!dateChange)return {written:false,reason:"empty"};
+      if(old&&historyRecordComparable(old)===historyRecordComparable(record))return {written:false,reason:"unchanged",record:old};
+      capacitySet(tx,ref,record,"history/"+key,old);return {written:true,record,key};
     });
-    if(!result.written){$("history-status").textContent="保存対象の終了セットがありません。書込みは行っていません。";return;}
-    $("history-status").textContent=`保存完了：${result.record.entries.length}セット。訂正後は再度「保存・更新」を押してください。`;
+    if(!result.written){
+      $("history-status").textContent=result.reason==="unchanged"?"保存内容に変更はありません。書込みは行っていません。最終保存："+historySavedTime(result.record.updatedAt)+"（日本時間）":"保存対象の終了セットがありません。書込みは行っていません。";
+      if(historyWatchError)retryHistoryWatch();
+      if(result.reason==="unchanged")await loadSimpleHistory(false);
+      return;
+    }
+    $("history-status").textContent=`保存完了：${result.record.entries.length}セット。最終保存：${historySavedTime(result.record.updatedAt)}（日本時間）。訂正後は再度「保存・更新」を押してください。`;
     $("history-change-day").checked=false;
-    if(historyWatchKey===result.key){historyWatchRecord=result.record;historyWatchKnown=true;historyWatchError="";await refreshHistorySetList();}
+    // 自端末の完了結果で監視中の新しい記録を上書きしない。状態は監視通知を採用する。
+    if(historyWatchError)retryHistoryWatch();
     await loadSimpleHistory(false);
   }catch(error){$("history-status").textContent="保存できませんでした："+(error.code==="permission-denied"?"Firestoreの追加ルールを確認してください。":error.message||"通信状態を確認してください。");}
-  finally{historyBusy=false;$("history-save").disabled=!isAdmin()||room==="9999";}
+  finally{historyBusy=false;$("history-save").disabled=!isAdmin()||room==="9999";$("leave").disabled=false;}
 }
 function historyTotals(records,from,to){
   const totals=new Map();
@@ -3499,34 +3779,41 @@ function historyTotals(records,from,to){
   return [...totals.values()].sort((a,b)=>b.win-a.win||b.pts-a.pts||a.name.localeCompare(b.name,"ja"));
 }
 function renderSimpleHistory(){
-  const from=$("history-from").value,to=$("history-to").value;
-  if(from&&!historyDay(from)||to&&!historyDay(to)||from&&to&&from>to){$("history-results").textContent="期間を正しく指定してください。";return;}
   try{
-    const rows=historyTotals(historyRows,from,to);
+    const rows=historySelectedRows(),from=$("history-from").value,to=$("history-to").value;
+    historyRenderError="";
     $("history-results").innerHTML=rows.length?"<div style='overflow-x:auto'><table><tr><th>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th><th>0点率</th></tr>"+rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.played}</td><td>${r.win}</td><td>${r.played?Math.round(r.win/r.played*100)+"%":"-"}</td><td>${r.setWin}</td><td>${r.n}</td><td>${r.pts}</td><td>${r.n?(r.pts/r.n).toFixed(1):"-"}</td><td>${r.zero}</td><td>${r.n?(r.zero/r.n*100).toFixed(1)+"%":"-"}</td></tr>`).join("")+"</table></div>":"対象の保存記録はありません。";
     const selected=historyRows.filter(r=>r.roomCode!=="9999"&&r.schema===1&&(!from||r.playedAt>=from)&&(!to||r.playedAt<=to));
-    $("history-sources").textContent=selected.map(r=>`${r.playedAt} 部屋${r.roomCode}：${(r.entries||[]).length}セット`).join(" ／ ");
-  }catch(error){$("history-results").textContent=error.message;}
+    $("history-sources").textContent=selected.map(r=>`${r.playedAt} 部屋${r.roomCode}：${(r.entries||[]).length}セット ／ 最終保存 ${historySavedTime(r.updatedAt)}（日本時間）`).join(" ／ ");
+  }catch(error){
+    historyRenderError=error.message||"集計できませんでした。";
+    $("history-results").textContent=historyRenderError;$("history-sources").textContent="";
+  }
+  updateHistoryCopyButton();updateHistoryReadStatus();
+  return !historyRenderError;
 }
 async function loadSimpleHistory(showStatus=true){
   const request=++historyRequest;
-  historyLoading=true;historyLoadError="";updateHistoryCopyButton();
-  if(showStatus)$("history-read-status").textContent="保存記録を読み込み中…（表示中の表は前回読込分です）";
+  if(showStatus&&historyWatchError)retryHistoryWatch();
+  historyLoading=true;historyLoadError="";updateHistoryCopyButton();updateHistoryReadStatus();
   try{
     const snapshot=await getDocs(collection(db,"history"));
     if(request!==historyRequest)return;
-    historyRows=snapshot.docs.map(doc=>doc.data()).filter(record=>record.roomCode!=="9999");
-    historyLoaded=true;historyFromCache=!!snapshot.metadata?.fromCache;
+    const next=snapshot.docs.map(doc=>doc.data()).filter(record=>record?.roomCode!=="9999");
+    validateHistoryRecords(next);
+    // 集計不能なデータを「読込完了」として採用しない。
+    historyTotals(next,"","");
+    historyRows=next;historyLoaded=true;historyFromCache=!!snapshot.metadata?.fromCache;
     renderSimpleHistory();
-    const saved=historyRows.find(row=>row.roomCode===room&&row.created===data.created);
+    const saved=historyWatchKnown?historyWatchRecord:historyRows.find(row=>row.roomCode===room&&row.created===data.created);
     if(saved&&historyDay(saved.playedAt)&&!$("history-day").dataset.dirty)$("history-day").value=saved.playedAt;
-    $("history-read-status").textContent=(historyFromCache?"キャッシュ表示（最新未確認）":"読込完了")+`：${historyRows.length}部屋分。9999は除外。最新の記録を見るには再読込してください。`;
     if(historyWatchKey)refreshHistorySetList();
   }catch(error){
     if(request!==historyRequest)return;
     historyLoadError="読込できませんでした："+(error.code==="permission-denied"?"Firestoreの追加ルールを確認してください。":error.message||"通信状態を確認してください。");
-    $("history-read-status").textContent=historyLoadError+" 表は前回読込分です。コピーは再読込成功後に行ってください。";
-  }finally{if(request===historyRequest){historyLoading=false;updateHistoryCopyButton();}}
+  }finally{
+    if(request===historyRequest){historyLoading=false;updateHistoryCopyButton();updateHistoryReadStatus();}
+  }
 }
 function updateSimpleHistoryControls(){
   $("history-save").disabled=historyBusy||!isAdmin()||room==="9999";
@@ -3537,6 +3824,7 @@ function updateSimpleHistoryControls(){
     $("history-day").value=new Date(data.created||Date.now()).toLocaleDateString("sv-SE",{timeZone:"Asia/Tokyo"});
   }
   ensureHistoryWatch();
+  updateHistorySavedTime();
   updateHistoryTargetSummary();
   updateHistoryCopyButton();
 }
