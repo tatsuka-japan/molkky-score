@@ -72,7 +72,8 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.41</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.42</span></h1>
+<div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -302,6 +303,33 @@ import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase
 import {getFirestore,doc,setDoc,getDoc,onSnapshot,runTransaction,collection,getDocs,serverTimestamp as firestoreServerTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 const firebaseConfig={apiKey:"AIzaSyAautN2cGfEco5KvR0iPzgftSgpiqr3pUw", authDomain:"molkky-998f1.firebaseapp.com", projectId:"molkky-998f1", storageBucket:"molkky-998f1.firebasestorage.app", messagingSenderId:"815701794917", appId:"1:815701794917:web:8c4271e83d153f2bb1268c"};
 const db=getFirestore(initializeApp(firebaseConfig));
+// 保存禁止・容量不足ではこのタブ内に退避する。権限の自動付与は行わない。
+const temporaryStorage=new Map(),unsavedStorageKeys=new Set();
+let storageReadFailed=false;
+function updateStorageWarning(){
+  const element=document.getElementById("storage-warning");if(!element)return;
+  const failed=storageReadFailed||unsavedStorageKeys.size>0;
+  element.classList.toggle("hide",!failed);
+  element.textContent=failed?"このブラウザーで端末保存に失敗しています。この画面では利用できますが、再読込み後は候補・参加チェック・PIN認証などが保持されない場合があります。":"";
+}
+const appStorage={
+  getItem(key){
+    if(unsavedStorageKeys.has(key))return temporaryStorage.get(key)??null;
+    try{
+      const value=globalThis.localStorage.getItem(key);
+      if(value!==null)temporaryStorage.set(key,value);else temporaryStorage.delete(key);
+      storageReadFailed=false;updateStorageWarning();return value;
+    }catch(error){storageReadFailed=true;updateStorageWarning();return temporaryStorage.get(key)??null;}
+  },
+  setItem(key,value){
+    const text=String(value);temporaryStorage.set(key,text);
+    try{globalThis.localStorage.setItem(key,text);unsavedStorageKeys.delete(key);storageReadFailed=false;updateStorageWarning();return true;}
+    catch(error){unsavedStorageKeys.add(key);updateStorageWarning();return false;}
+  },
+  get me(){return this.getItem("me")||"";},
+  set me(value){this.setItem("me",value);}
+};
+
 const FIRESTORE_DOCUMENT_LIMIT=1024*1024;
 const MAX_APP_DOCUMENT_BYTES=800*1024;
 const capacityTimestampValues=new WeakSet();
@@ -529,35 +557,58 @@ function getThrowLogHTML(set,match,gameIndex,list,selectedIndex){
 }
 
 
-let currentPlayer=localStorage.me||"";
+let currentPlayer=appStorage.me||"";
 let playerSessionBusy=false;
+let playerSelectionGeneration=0,playerSessionQueue=Promise.resolve();
+
 function hasPlayerSession(d){
   return isAdmin()||!!currentPlayer&&(d?.playerSessions||[]).some(item=>item.id===inputSessionId&&item.name===currentPlayer&&item.expires>Date.now());
 }
-async function claimPlayerSession(release=false){
-  if(!room||playerSessionBusy)return false;
-  playerSessionBusy=true;
-  const name=currentPlayer;
-  try {
-    return await runTransaction(db,async tx=>{
-      const ref=doc(db,"rooms",room),snap=await tx.get(ref);
-      if(!snap.exists())return false;
-      const sessions=(snap.data().playerSessions||[]).filter(item=>item.expires>Date.now()&&item.id!==inputSessionId);
-      if(!release&&name&&!isAdmin()){
-        if(sessions.some(item=>item.name===name))return false;
-        sessions.push({id:inputSessionId,name,expires:Date.now()+INPUT_LEASE_MS});
-      }
-      capacityUpdate(tx,ref,snap.data(),{playerSessions:sessions});return true;
-    });
-  } finally {playerSessionBusy=false;}
+async function claimPlayerSession(release=false,request={}){
+  if(!room){request.reason="missing";return false;}
+  const code=room,name=currentPlayer,generation=playerSelectionGeneration;
+  const task=playerSessionQueue.then(async()=>{
+    if(room!==code||(!release&&(generation!==playerSelectionGeneration||currentPlayer!==name))){request.reason="stale";return false;}
+    playerSessionBusy=true;
+    try{
+      return await runTransaction(db,async tx=>{
+        const ref=doc(db,"rooms",code),snap=await tx.get(ref);
+        if(!snap.exists()){request.reason="missing";return false;}
+        if(room!==code||(!release&&(generation!==playerSelectionGeneration||currentPlayer!==name))){request.reason="stale";return false;}
+        const sessions=(snap.data().playerSessions||[]).filter(item=>item.expires>Date.now()&&item.id!==inputSessionId);
+        if(!release&&name&&!isAdmin()){
+          if(sessions.some(item=>item.name===name)){request.reason="occupied";return false;}
+          sessions.push({id:inputSessionId,name,expires:Date.now()+INPUT_LEASE_MS});
+        }
+        capacityUpdate(tx,ref,snap.data(),{playerSessions:sessions});request.reason="ok";return true;
+      });
+    }finally{playerSessionBusy=false;}
+  });
+  playerSessionQueue=task.catch(()=>false);
+  return task;
 }
 async function activatePlayer(){
-  try {
-    if(!await claimPlayerSession()){
-      currentPlayer="";alert("この名前は別の端末・タブで使用中です。観戦に切り替えました。");
-    } else localStorage.me=currentPlayer;
-  } catch(error){currentPlayer="";alert("利用端末を確認できませんでした。通信状態を確認して選び直してください。");}
-  if(data)render();
+  const generation=++playerSelectionGeneration,code=room,name=currentPlayer,request={};
+  const current=()=>generation===playerSelectionGeneration&&room===code&&currentPlayer===name;
+  try{
+    const claimed=await claimPlayerSession(false,request);
+    if(!current())return false;
+    if(!claimed){
+      if(request.reason==="stale")return false;
+      currentPlayer="";appStorage.me="";
+      alert(request.reason==="occupied"?"この名前は別の端末・タブで使用中です。観戦に切り替えました。":"部屋の利用端末を確認できませんでした。再接続してください。");
+      try{await claimPlayerSession(true);}catch(error){console.warn(error);}
+      if(generation===playerSelectionGeneration&&room===code&&data)render();
+      return false;
+    }
+    appStorage.me=name;
+    if(data)render();return true;
+  }catch(error){
+    if(!current())return false;
+    currentPlayer="";appStorage.me="";
+    alert(error.code==="capacity-limit"?error.message:"利用端末を確認できませんでした。通信状態を確認して選び直してください。");
+    if(data)render();return false;
+  }
 }
 let orderFormKey="";
 function throwOwners(set,match,list){
@@ -574,12 +625,12 @@ function throwOwners(set,match,list){
 }
 function adminAuthKey(){return `molkky:admin-auth:v1:${room}`;}
 function isAdmin(){
-  return !!room&&currentPlayer==="佐藤"&&localStorage.getItem(adminAuthKey())==="verified";
+  return !!room&&currentPlayer==="佐藤"&&appStorage.getItem(adminAuthKey())==="verified";
 }
 function authenticateAdminSelection(){
   if(!room||currentPlayer!=="佐藤"||isAdmin())return;
   const pin=prompt("佐藤（管理者）のPINコードを入力してください。このブラウザーではルームごとに初回のみ必要です。");
-  if(pin==="0918")localStorage.setItem(adminAuthKey(),"verified");
+  if(pin==="0918")appStorage.setItem(adminAuthKey(),"verified");
   else {
     currentPlayer="";
     if(pin!==null)alert("PINコードが違います。観戦に切り替えました。");
@@ -669,7 +720,7 @@ function isFixedHomeMember(name){return FIXED_HOME_MEMBERS.includes(name);}
 let homeMembersStatus="";
 function loadHomeMembers(){
   try{
-    const raw=localStorage.getItem(HOME_MEMBERS_KEY);
+    const raw=appStorage.getItem(HOME_MEMBERS_KEY);
     if(raw===null)return [...DEFAULT_HOME_MEMBERS];
     const saved=JSON.parse(raw);
     if(!Array.isArray(saved)||saved.some(name=>typeof name!=="string"))throw Error("invalid members");
@@ -682,7 +733,7 @@ function loadHomeMembers(){
 let homeMembersList=loadHomeMembers();
 function loadHomeMemberSelection(){
   try{
-    const raw=localStorage.getItem(HOME_SELECTION_KEY);
+    const raw=appStorage.getItem(HOME_SELECTION_KEY);
     if(raw===null)return new Set(homeMembersList);
     const selected=JSON.parse(raw);
     if(!Array.isArray(selected)||selected.some(name=>typeof name!=="string"))throw Error("invalid selection");
@@ -697,7 +748,7 @@ const HOME_USAGE_KEY="molkky_home_member_usage_v1";
 function loadHomeUsage(){
   const usage=new Map(),now=Date.now();
   try{
-    const raw=localStorage.getItem(HOME_USAGE_KEY),saved=raw===null?[]:JSON.parse(raw);
+    const raw=appStorage.getItem(HOME_USAGE_KEY),saved=raw===null?[]:JSON.parse(raw);
     if(!Array.isArray(saved))throw Error("invalid usage");
     for(const entry of saved){
       if(!entry||typeof entry.name!=="string"||!homeMembersList.includes(entry.name))continue;
@@ -743,9 +794,8 @@ function cleanupHomeMembers(){
 function saveHomeMembers(){
   syncHomeUsage();
   try{
-    localStorage.setItem(HOME_MEMBERS_KEY,JSON.stringify(homeMembersList));
-    localStorage.setItem(HOME_SELECTION_KEY,JSON.stringify([...homeMemberSelection]));
-    localStorage.setItem(HOME_USAGE_KEY,JSON.stringify([...homeMemberUsage.values()]));
+    const saved=[appStorage.setItem(HOME_MEMBERS_KEY,JSON.stringify(homeMembersList)),appStorage.setItem(HOME_SELECTION_KEY,JSON.stringify([...homeMemberSelection])),appStorage.setItem(HOME_USAGE_KEY,JSON.stringify([...homeMemberUsage.values()]))];
+    if(saved.some(value=>!value))throw Error("browser storage unavailable");
     homeMembersStatus="この端末に保存しました。";
     return true;
   }catch(error){
@@ -820,7 +870,7 @@ renderHomeMembers();
 function isTeamSet(type){return type==="team"||type==="team_league"||type==="team_tournament";}
 function isLeagueSet(type){return type==="league"||type==="team_league";}
 function isTournamentSet(type){return type==="tournament"||type==="team_tournament";}
-function teamCardColor(name){return ({"赤チーム":"#ffe6e6","白チーム":"#f5f5f5","青チーム":"#e6f1ff","黄チーム":"#fff9d9","緑チーム":"#e8ffe8","紫チーム":"#f3e6ff"})[name]||"#ffffff";}
+function teamCardColor(name){const colors={"赤チーム":"#ffe6e6","白チーム":"#f5f5f5","青チーム":"#e6f1ff","黄チーム":"#fff9d9","緑チーム":"#e8ffe8","紫チーム":"#f3e6ff"};return Object.prototype.hasOwnProperty.call(colors,name)?colors[name]:"#ffffff";}
 function playerCardColor(index,count){const hue=(index*360/Math.max(1,count))%360;return `hsl(${hue} 72% 91%)`;}
 function sideDisplayName(set,side){
   const name=side?.name||"未定";
@@ -1221,7 +1271,7 @@ function isMyTurn(){
 }
 
 const teamNamesDefault = ["赤チーム", "白チーム", "青チーム", "黄チーム", "緑チーム", "紫チーム", "橙チーム", "桃チーム"];
-let teamAssignments = {};
+let teamAssignments = Object.create(null);
 let teamOrder = {};
 
 function scoreSideKey(side, type) {
@@ -1540,7 +1590,7 @@ function summarize(set){
 }
 
 function tally(room){
-  const T={};
+  const T=Object.create(null);
   const get=n=>T[n]||(T[n]={name:n,played:0,win:0,setWin:0,n:0,pts:0,zero:0});
   (room.players||[]).forEach(get);
   (room.sets||[]).forEach(set=>{
@@ -1592,7 +1642,7 @@ function updateTeamCheckboxes(){
   const busyMembers = getActiveMembersInOtherSets();
   
   if(!teamAssignments[count]) {
-    teamAssignments[count] = {};
+    teamAssignments[count] = Object.create(null);
   }
   
   if(!Array.isArray(teamOrder[count]) || teamOrder[count].length !== count) {
@@ -1684,7 +1734,7 @@ $("random-team-assign").onclick=()=>{
   const busyMembers=getActiveMembersInOtherSets();
   const candidates=data.players.filter(name=>!busyMembers.has(name)&&!/^.+の\d+人目$/.test(name));
   if(candidates.length<count){alert(`チーム分けには、参加可能なメンバーが${count}人以上必要です。`);return;}
-  if(!teamAssignments[count])teamAssignments[count]={};
+  if(!teamAssignments[count])teamAssignments[count] = Object.create(null);
   Object.keys(teamAssignments[count]).forEach(name=>{
     if(!busyMembers.has(name)&&!/^.+の\d+人目$/.test(name))delete teamAssignments[count][name];
   });
@@ -1703,7 +1753,7 @@ $("add-opponent-btn").onclick = () => {
   const count = parseInt($("teamcount").value) || 2;
   const targetTeamIndex = count - 1;
   const size = parseInt($("opponent-size").value) || 2;
-  if(!teamAssignments[count]) teamAssignments[count] = {};
+  if(!teamAssignments[count]) teamAssignments[count] = Object.create(null);
   const teamName = teamNamesDefault[targetTeamIndex] || `チーム${targetTeamIndex+1}`;
   const syntheticPrefix = `${teamName}の`;
   const previousSyntheticNames = Object.keys(teamAssignments[count]).filter(name =>
@@ -1745,7 +1795,7 @@ window.addMemberToTeam = (teamIndex, selectElem, count) => {
   const memberName = selectElem.value;
   if(!memberName) return;
   selectElem.value = "";
-  if(!teamAssignments[count]) teamAssignments[count] = {};
+  if(!teamAssignments[count]) teamAssignments[count] = Object.create(null);
   teamAssignments[count][memberName] = teamIndex;
   updateTeamCheckboxes();
 };
@@ -2295,7 +2345,9 @@ $("addbtn").onclick=async()=>{
 $("me").onchange=async()=>{
   currentPlayer=$("me").value;
   authenticateAdminSelection();
-  await activatePlayer();
+  const activation=activatePlayer(),generation=playerSelectionGeneration;
+  await activation;
+  if(generation!==playerSelectionGeneration)return;
   render();
   try{await changeInputLease(false);}catch(error){console.warn(error);}
 };
@@ -3077,13 +3129,13 @@ function hasSetThrows(set){
 function blockEditorState(set){
   const key=`${room}:${set.id}`;
   if(!blockEditorStates.has(key)){
-    let hidden=false;try{hidden=localStorage.getItem(`block-hidden:${key}`)==="1";}catch(error){}
+    let hidden=false;try{hidden=appStorage.getItem(`block-hidden:${key}`)==="1";}catch(error){}
     blockEditorStates.set(key,{hidden,busy:false,draft:null,message:"",renderKey:null});
   }
   return blockEditorStates.get(key);
 }
 function saveBlockHidden(set,state){
-  try{localStorage.setItem(`block-hidden:${room}:${set.id}`,state.hidden?"1":"0");}catch(error){}
+  try{appStorage.setItem(`block-hidden:${room}:${set.id}`,state.hidden?"1":"0");}catch(error){}
 }
 function captureBlockDraft(){
   const set=data&&data.sets[cur];if(!set)return;
@@ -3722,7 +3774,7 @@ function buildHistoryRecord(code,d,old,day){
     ids.add(String(set.id));
     if(!summarize(set).over){entries.delete(String(set.id));continue;}
     const names=uniq([...(set.sides||[]),...(set.matches||[]).flatMap(match=>match.customSides||match.sides||[])].filter(Boolean).flatMap(side=>side.players||[]));
-    if(names.some(name=>typeof name!=="string"||Object.prototype.hasOwnProperty.call(Object.prototype,name)))throw Error("集計できない参加者名があります。");
+    if(names.some(name=>typeof name!=="string"))throw Error("集計できない参加者名があります。");
     const rows=tally({players:[],sets:[{...set,archived:true}]}).filter(row=>!/^.+の\d+人目$/.test(row.name));
     if(!set.archived){
       const full=new Map(tally({players:[],sets:[set]}).map(row=>[row.name,row]));
