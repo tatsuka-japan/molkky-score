@@ -72,7 +72,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.28</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.33</span></h1>
 <div id="home">
 <div class="card">
 <b>今日の部屋を作る</b>
@@ -269,6 +269,14 @@ td.l,th.l{text-align:left}
 <div id="stats"></div>
 <p><button class="sub" id="copystats">表をコピー（Excelに貼り付け用）</button></p>
 </div>
+<div class="card"><details id="simple-history-panel"><summary><b>保存した記録・生涯成績</b></summary>
+<p class="pl">自動保存ではありません。終了・中断保存したセットを管理者が保存します。訂正後も保存・更新が必要です。部屋を削除する前に保存完了を確認してください。</p>
+<p><label>この部屋の開催日 <input type="date" id="history-day"></label> <label><input type="checkbox" id="history-change-day">保存済みの開催日を変更</label> <button id="history-save" class="sub">終了セットを保存・更新（管理者）</button></p>
+<p id="history-status" role="status"></p>
+<p><label>開始日 <input type="date" id="history-from"></label> ～ <label>終了日 <input type="date" id="history-to"></label> <button id="history-load" class="sub">保存記録を読込・更新</button></p>
+<p class="pl">期間が空欄なら全期間、同じ日を指定すると日別です。名前が同じ人は同一人物として集計します。名前変更前後は別集計です。</p>
+<p id="history-read-status" role="status"></p><div id="history-results"></div><p id="history-sources" class="pl"></p>
+</details></div>
 <div class="card"><b>セット一覧</b><div id="setlist"></div></div>
 </div>
 </div>
@@ -287,7 +295,7 @@ function unlock() {
 </script>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getFirestore,doc,setDoc,getDoc,onSnapshot,runTransaction} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getFirestore,doc,setDoc,getDoc,onSnapshot,runTransaction,collection,getDocs} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 const firebaseConfig={apiKey:"AIzaSyAautN2cGfEco5KvR0iPzgftSgpiqr3pUw", authDomain:"molkky-998f1.firebaseapp.com", projectId:"molkky-998f1", storageBucket:"molkky-998f1.firebasestorage.app", messagingSenderId:"815701794917", appId:"1:815701794917:web:8c4271e83d153f2bb1268c"};
 const db=getFirestore(initializeApp(firebaseConfig));
 let matchTimerInterval = null;
@@ -2709,8 +2717,8 @@ function roomCreatedDate(roomData){
   }catch(error){return "不明";}
 }
 $("copystats").onclick=async()=>{
-  const rows=[["部屋コード",room||"不明"],["日付（部屋作成日・日本時間）",roomCreatedDate(data)],[],["名前","ゲーム数","勝","勝率","セット優勝","投球数","総得点","平均点/投","0点回数"]];
-  tally(data).forEach(t=>rows.push([t.name,t.played,t.win,t.played?(t.win/t.played).toFixed(3):"",t.setWin,t.n,t.pts,t.n?(t.pts/t.n).toFixed(2):"",t.zero]));
+  const rows=[["部屋コード",room||"不明"],["日付（部屋作成日・日本時間）",roomCreatedDate(data)],[],["名前","ゲーム数","勝","勝率","セット優勝","投球数","総得点","平均点/投","0点回数","0点率"]];
+  tally(data).forEach(t=>rows.push([t.name,t.played,t.win,t.played?(t.win/t.played).toFixed(3):"",t.setWin,t.n,t.pts,t.n?(t.pts/t.n).toFixed(2):"",t.zero,t.n?(t.zero/t.n*100).toFixed(1)+"%":""]));
   const txt=rows.map(r=>r.join("\t")).join("\n");
   try{await navigator.clipboard.writeText(txt);alert("コピーしました。Excelに貼り付けてください。");}
   catch(e){prompt("コピーして Excel に貼り付けてください",txt);}
@@ -3271,13 +3279,121 @@ function renderSet(set){
 
 function renderStats(){
   stopTimer();
+  updateSimpleHistoryControls();
   $("stats-room-info").textContent=`部屋コード：${room||"不明"} ／ 日付：${roomCreatedDate(data)}（部屋作成日）`;
   const T=tally(data);
-  $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th></tr>"+
-    T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.pts}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td></tr>`).join("")+"</table>"+
-    "<p class='pl'>「ゲーム数」は決着したゲームの参加数、「勝」はそのうち勝利したゲーム数です。中断保存したセットは決着済みゲームだけを集計し、セット優勝には加算しません。総得点は集計対象の投球で獲得した得点の合計、平均点は1投あたりの得点です。</p>";
+  $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th><th>0点率</th></tr>"+
+    T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.pts}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td><td>${t.n?(t.zero/t.n*100).toFixed(1)+"%":"-"}</td></tr>`).join("")+"</table>"+
+    "<p class='pl'>「ゲーム数」は決着したゲームの参加数、「勝」はそのうち勝利したゲーム数です。中断保存したセットは決着済みゲームだけを集計し、セット優勝には加算しません。総得点は集計対象の投球で獲得した得点の合計、平均点は1投あたりの得点です。0点率は0点回数÷投球数の割合です。</p>";
 
 }
+// 小規模版：明示保存。部屋から得た最新データで記録を置換し、合算値は保存しない。
+let historyBusy=false,historyRows=[],historyRequest=0;
+const HISTORY_FIELDS=["played","win","setWin","n","pts","zero"];
+function historyDay(value){return typeof value==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number(value.slice(0,4))>=2000&&!isNaN(Date.parse(value+"T00:00:00Z"))&&new Date(value+"T00:00:00Z").toISOString().slice(0,10)===value;}
+function historyRoomKey(code,d){
+  if(!/^\d{4}$/.test(code)||!Number.isSafeInteger(d.created)||d.created<=0)throw Error("部屋の作成日時を確認できません。");
+  return code+"_"+d.created;
+}
+function buildHistoryRecord(code,d,old,day){
+  const key=historyRoomKey(code,d);
+  if(!historyDay(day))throw Error("開催日を正しく入力してください。");
+  const sets=d.sets||[],ids=new Set();
+  const entries=new Map((old?.entries||[]).map(item=>[item.id,item]));
+  for(const set of sets){
+    if(!set.id||ids.has(String(set.id)))throw Error("セットIDに欠落・重複があるため保存できません。");
+    ids.add(String(set.id));
+    if(!summarize(set).over){entries.delete(String(set.id));continue;}
+    const names=uniq([...(set.sides||[]),...(set.matches||[]).flatMap(match=>match.customSides||match.sides||[])].filter(Boolean).flatMap(side=>side.players||[]));
+    if(names.some(name=>typeof name!=="string"||Object.prototype.hasOwnProperty.call(Object.prototype,name)))throw Error("集計できない参加者名があります。");
+    const rows=tally({players:[],sets:[{...set,archived:true}]}).filter(row=>!/^.+の\d+人目$/.test(row.name));
+    if(!set.archived){
+      const full=new Map(tally({players:[],sets:[set]}).map(row=>[row.name,row]));
+      rows.forEach(row=>row.setWin=full.get(row.name)?.setWin||0);
+    }
+    for(const row of rows)if(HISTORY_FIELDS.some(field=>!Number.isSafeInteger(row[field])||row[field]<0))throw Error("成績に不正な値があります。");
+    entries.set(String(set.id),{id:String(set.id),name:set.name||"",type:set.type,archived:!!set.archived,rows});
+  }
+  if(entries.size>500)throw Error("保存セットが500件を超えています。部屋を分けてください。");
+  const result={schema:1,roomCode:code,created:d.created,playedAt:day,entries:[...entries.values()],updatedAt:Date.now()};
+  if(new TextEncoder().encode(JSON.stringify(result)).length>700*1024)throw Error("保存記録が大きすぎます。部屋を分けてください。");
+  return {key,record:result};
+}
+async function saveSimpleHistory(){
+  if(historyBusy)return;
+  if(!isAdmin()){alert("保存・更新はPIN認証済みの佐藤だけが操作できます。");return;}
+  if(roomSyncBlocked){alert("部屋に再接続してから保存してください。");return;}
+  const code=room,day=$("history-day").value,changeDay=$("history-change-day").checked;
+  historyBusy=true;$("history-save").disabled=true;
+  $("history-status").textContent="保存中…";
+  try{
+    const count=await runTransaction(db,async tx=>{
+      const source=await tx.get(doc(db,"rooms",code));
+      if(!source.exists())throw Error("部屋が見つかりません。");
+      if(room!==code||!isAdmin())throw Error("管理者の認証状態が変わりました。");
+      const latest=source.data(),key=historyRoomKey(code,latest);
+      if(key!==historyRoomKey(code,data))throw Error("部屋が作り直されています。再入室して確認してください。");
+      const ref=doc(db,"history",key),previous=await tx.get(ref);
+      if(previous.exists()&&previous.data().playedAt!==day&&!changeDay)throw Error("保存済みの開催日と異なります。保存記録を読み込むか、開催日変更のチェックを入れてください。");
+      const {record}=buildHistoryRecord(code,latest,previous.exists()?previous.data():null,day);
+      tx.set(ref,record);return record.entries.length;
+    });
+    $("history-status").textContent=`保存完了：${count}セット。訂正後は再度「保存・更新」を押してください。`;
+    $("history-change-day").checked=false;
+    await loadSimpleHistory(false);
+  }catch(error){$("history-status").textContent="保存できませんでした："+(error.code==="permission-denied"?"Firestoreの追加ルールを確認してください。":error.message||"通信状態を確認してください。");}
+  finally{historyBusy=false;$("history-save").disabled=!isAdmin();}
+}
+function historyTotals(records,from,to){
+  const totals=new Map();
+  for(const record of records){
+    if(record.schema!==1||!historyDay(record.playedAt)||from&&record.playedAt<from||to&&record.playedAt>to)continue;
+    for(const entry of record.entries||[])for(const row of entry.rows||[]){
+      if(typeof row.name!=="string"||HISTORY_FIELDS.some(field=>!Number.isSafeInteger(row[field])||row[field]<0))throw Error("保存された成績の形式を確認してください。");
+      const total=totals.get(row.name)||Object.fromEntries([["name",row.name],...HISTORY_FIELDS.map(field=>[field,0])]);
+      for(const field of HISTORY_FIELDS){total[field]+=row[field];if(!Number.isSafeInteger(total[field]))throw Error("集計値が大きすぎます。");}
+      totals.set(row.name,total);
+    }
+  }
+  return [...totals.values()].sort((a,b)=>b.win-a.win||b.pts-a.pts||a.name.localeCompare(b.name,"ja"));
+}
+function renderSimpleHistory(){
+  const from=$("history-from").value,to=$("history-to").value;
+  if(from&&!historyDay(from)||to&&!historyDay(to)||from&&to&&from>to){$("history-results").textContent="期間を正しく指定してください。";return;}
+  try{
+    const rows=historyTotals(historyRows,from,to);
+    $("history-results").innerHTML=rows.length?"<div style='overflow-x:auto'><table><tr><th>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th><th>0点率</th></tr>"+rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.played}</td><td>${r.win}</td><td>${r.played?Math.round(r.win/r.played*100)+"%":"-"}</td><td>${r.setWin}</td><td>${r.n}</td><td>${r.pts}</td><td>${r.n?(r.pts/r.n).toFixed(1):"-"}</td><td>${r.zero}</td><td>${r.n?(r.zero/r.n*100).toFixed(1)+"%":"-"}</td></tr>`).join("")+"</table></div>":"対象の保存記録はありません。";
+    const selected=historyRows.filter(r=>r.schema===1&&(!from||r.playedAt>=from)&&(!to||r.playedAt<=to));
+    $("history-sources").textContent=selected.map(r=>`${r.playedAt} 部屋${r.roomCode}：${(r.entries||[]).length}セット`).join(" ／ ");
+  }catch(error){$("history-results").textContent=error.message;}
+}
+async function loadSimpleHistory(showStatus=true){
+  const request=++historyRequest;
+  if(showStatus)$("history-read-status").textContent="保存記録を読み込み中…";
+  try{
+    const snapshot=await getDocs(collection(db,"history"));
+    if(request!==historyRequest)return;
+    historyRows=snapshot.docs.map(doc=>doc.data());renderSimpleHistory();
+    const saved=historyRows.find(row=>row.roomCode===room&&row.created===data.created);
+    if(saved&&historyDay(saved.playedAt)&&!$("history-day").dataset.dirty)$("history-day").value=saved.playedAt;
+    $("history-read-status").textContent=`読込完了：${historyRows.length}部屋分。最新の記録を見るには再読込してください。`;
+  }catch(error){if(request!==historyRequest)return;$("history-read-status").textContent="読込できませんでした："+(error.code==="permission-denied"?"Firestoreの追加ルールを確認してください。":error.message||"通信状態を確認してください。");}
+}
+function updateSimpleHistoryControls(){
+  $("history-save").disabled=historyBusy||!isAdmin();
+  if($("history-day").dataset.room!==room){
+    $("history-day").dataset.room=room;
+    delete $("history-day").dataset.dirty;
+    $("history-change-day").checked=false;
+    $("history-day").value=new Date(data.created||Date.now()).toLocaleDateString("sv-SE",{timeZone:"Asia/Tokyo"});
+  }
+}
+$("history-save").onclick=saveSimpleHistory;
+$("history-load").onclick=()=>loadSimpleHistory();
+$("history-from").onchange=renderSimpleHistory;
+$("history-to").onchange=renderSimpleHistory;
+$("history-day").onchange=()=>$("history-day").dataset.dirty="1";
+
 </script>
 </body>
 </html>
