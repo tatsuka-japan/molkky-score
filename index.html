@@ -72,7 +72,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.42</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.48</span></h1>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -108,8 +108,9 @@ td.l,th.l{text-align:left}
 <span class="pl">自分は</span>
 <select id="me" style="width:auto"></select>
 <label style="margin-top:6px;"><input type="checkbox" id="restrict-my-turn" checked> 🔒 自分のチーム（または自分）の番のときだけ入力する</label>
-<div><input id="addname" type="text" placeholder="参加者を追加" style="width:60%"> <button class="sub" id="addbtn">追加</button></div>
+<details><summary>部屋の参加者を追加</summary><div><input id="addname" type="text" placeholder="参加者を追加" style="width:60%"> <button class="sub" id="addbtn">追加</button></div>
 <div id="addname-status" class="pl" role="status" aria-live="polite"></div>
+</details>
 <button class="sub" id="leave" style="margin-top:6px">退出</button>
 </div>
 <div id="tabs"></div>
@@ -221,6 +222,7 @@ td.l,th.l{text-align:left}
 <div id="future-games-status" class="pl" role="status" aria-live="polite"></div>
 <div id="future-games-history" class="pl"></div>
 </details>
+<details id="set-members-card" class="card"><summary>セットの参加者を追加・削除</summary><p class="pl">最初の投球前のみ変更できます。保存すると対戦表・ブロック設定・投球順の調整を作り直します。参加する人にチェックを入れてください。団体戦は所属チームも選択してください。チェックを外すだけでは部屋の参加者・過去成績は残ります。固定8人以外の「削除」は、未終了セットに参加していない人を部屋の一覧から削除します（過去成績・ホーム候補は保持）。</p><div id="set-members-editor"></div><input id="set-member-name" placeholder="新しい参加者名"><button type="button" class="sub" id="set-member-add">候補に追加</button><p><button type="button" id="set-members-save">参加者を保存</button></p><div id="set-members-status" class="pl" role="status"></div></details>
 <div id="solo-block-card" class="card hide" style="background:#eef4fb;">
 <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="block-config-title">ブロック設定</b><button type="button" class="sub" id="toggle-block-config" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
 <div id="block-config-content">
@@ -258,6 +260,7 @@ td.l,th.l{text-align:left}
 <p><button class="go hide" id="next">次の対戦へ進む</button></p>
 <p><button class="sub" id="undo">修正</button>
 <button class="sub" id="return-live">最新</button><span id="edit-throw-status" role="status"></span>
+<button class="sub hide" id="delete-unstarted-set">未開始セットを削除</button>
 <button class="sub hide" id="archive-set">中断終了（勝敗なし）</button></p>
 </div>
 </div>
@@ -1678,8 +1681,10 @@ function updateTeamCheckboxes(){
     const teamName = teamNamesDefault[i] || `チーム${i+1}`;
     html += `<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px; background:${teamCardColor(teamName)};" class="team-card" data-index="${i}">
       <b>${teamName}</b>
-      <button type="button" class="sub" style="font-size:12px;padding:2px 6px;float:right;" onclick="window.sortTeam(${i}, 'up')">[UP]</button>
-      <button type="button" class="sub" style="font-size:12px;padding:2px 6px;float:right;margin-right:4px;" onclick="window.sortTeam(${i}, 'down')">[DOWN]</button>
+      <span style="float:right;display:inline-flex;gap:4px;">
+        <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeam(${i}, 'up')">[UP]</button>
+        <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeam(${i}, 'down')">[DOWN]</button>
+      </span>
       <div class="chk team-chk-group" style="margin-top:6px;">` +
       players.map(n => {
         const isBusy = busyMembers.has(n);
@@ -1827,7 +1832,16 @@ window.sortTeamMember = (btn, direction) => {
     const next = item.nextElementSibling;
     if(next) item.parentNode.insertBefore(next, item);
   }
+  if(item.classList.contains("next-side-item"))refreshSoloOrderPositions(item.parentNode);
 };
+
+function soloOrderPositionText(index){return `${index===0?"🔵":index===1?"🔴":"🟡"} ${index+1}番手: `;}
+function refreshSoloOrderPositions(container){
+  container.querySelectorAll(".next-side-item").forEach((row,index)=>{
+    const label=row.querySelector("[data-order-position]");
+    if(label)label.textContent=soloOrderPositionText(index);
+  });
+}
 
 window.sortSolo = (btn, direction) => {
   const item = btn.closest(".solo-item");
@@ -1903,7 +1917,7 @@ function renderNextOrderForm(set) {
     html = `<div style="background:#fff; padding:8px; border-radius:6px; border:1px solid #ddd;" id="next-sides-group">` +
       lastMatchSides.map((s, idx) => {
         return `<div style="display:flex; justify-content:space-between; align-items:center; margin:6px 0; padding:6px; background:#f9f9f9; border-radius:4px;" class="next-side-item" data-side-name="${esc(s.name)}">
-          <span style="font-weight:bold;">${idx === 0 ? "🔵 1番手: " : idx === 1 ? "🔴 2番手: " : `🟡 ${idx+1}番手: `} ${esc(s.name)}</span>
+          <span style="font-weight:bold;"><span data-order-position>${soloOrderPositionText(idx)}</span><span>${esc(s.name)}</span></span>
           <div>
             <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
             <button type="button" class="sub" style="font-size:12px;padding:2px 6px;margin-left:4px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button>
@@ -2120,7 +2134,7 @@ function shuffleArray(array) {
   return arr;
 }
 
-async function createSet(set){
+async function createSet(set, replacement=null){
   try {
     const names = isTeamSet(set.type) ? set.sides.flatMap(s=>s.players) : set.sides.map(s=>s.name);
     if(uniq(names).length!==names.length){alert("同じ名前が重複しています");return false;}
@@ -2281,13 +2295,19 @@ async function createSet(set){
     let conflictingNames=[];
     const saved=await mutate(d=>{
       conflictingNames=[];
-      const activeMembers=getActiveSetMembers(d);
+      if(replacement){
+        const target=d.sets.find(item=>item.id===replacement.id);
+        if(!target||setMemberFingerprint(target)!==replacement.baseline||!canEditSetMembers(target))throw Error("セットが更新されたか、投球が開始されました。最新の内容を確認してください。");
+      }
+      const activeMembers=getActiveSetMembers(replacement?{...d,sets:d.sets.filter(item=>item.id!==replacement.id)}:d);
       conflictingNames=names.filter(name=>activeMembers.has(name));
       if(conflictingNames.length)return false;
       names.forEach(n=>{if(!d.players.includes(n))d.players.push(n);});
     const typeLabel = set.type==="team"?"団体戦":set.type==="team_league"?"団体リーグ":set.type==="team_tournament"?"団体トーナメント":isTournamentSet(set.type)?"トーナメント":isLeagueSet(set.type)?"総当たりリーグ":"個人戦";
       const cnt=d.sets.filter(x=>x.type===set.type).length+1;
-      d.sets.push({...set, id:newSetId(), name:set.name||typeLabel+cnt, matches, activeMatchIndex: 0});
+      const created={...set,id:replacement?replacement.id:newSetId(),name:set.name||typeLabel+cnt,matches,activeMatchIndex:0};
+      if(replacement)d.sets[d.sets.findIndex(item=>item.id===replacement.id)]=created;
+      else d.sets.push(created);
     });
     if(conflictingNames.length)alert(`未終了の別セットに参加中のため作成できません：${conflictingNames.join("、")}`);
     return saved;
@@ -3062,6 +3082,7 @@ function render(){
   // 管理者認証は「自分は」で佐藤を選んだ時だけ行う。
   if(currentPlayer==="佐藤"&&!isAdmin())currentPlayer="";
   const d=data,sets=d.sets;
+  if(view==="set"&&!sets[cur]){view="new";cur=0;}
   const s2=JSON.stringify([d.players,[...getActiveSetMembers(d)].sort()]);
   if(s2!==sig){
     sig=s2;
@@ -3307,6 +3328,126 @@ function ordinaryProgressText(set,match){
   const prefix=set.type==="solo"?`${match.blockName||"ブロック1"}・`:"";
   return `${prefix}第${position}ゲーム${set.mode==="first"?`（${firstTarget(set,match.blockName)}勝先取）`:` / 全${games.length}ゲーム`}`;
 }
+
+let deleteSetBusy=false;
+async function deleteUnstartedSet(id){
+  if(deleteSetBusy||!currentPlayer)return false;
+  const set=data.sets.find(item=>item.id===id);
+  if(!canEditSetMembers(set)){alert("投球済み・進行済み・中断保存済みのセットは削除できません。");return false;}
+  const baseline=setMemberFingerprint(set);
+  if(!confirm(`未開始の「${set.name}」を削除します。参加者の登録は残ります。よろしいですか？`))return false;
+  deleteSetBusy=true;
+  try{
+    const saved=await mutate(d=>{
+      const target=d.sets.find(item=>item.id===id);
+      if(!canEditSetMembers(target)||setMemberFingerprint(target)!==baseline)throw Error("セットが更新されたか投球が開始されました。最新の内容を確認してください。");
+      d.sets=d.sets.filter(item=>item.id!==id);
+    });
+    if(!saved)return false;
+    data.sets=data.sets.filter(item=>item.id!==id);
+    blockEditorStates.delete(id);if(setMemberDraft?.id===id)setMemberDraft=null;
+    selectedThrow=null;orderFormKey=null;view="new";cur=0;render();return true;
+  }catch(error){alert(`削除できませんでした：${error.message}`);return false;}
+  finally{deleteSetBusy=false;$("delete-unstarted-set").disabled=false;}
+}
+$("delete-unstarted-set").onclick=()=>{const set=data.sets[cur];if(set)return deleteUnstartedSet(set.id);};
+let setMemberDraft=null;
+let setMemberSaving=false;
+function setMemberFingerprint(set){
+  const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+  return JSON.stringify(canonical(set));
+}
+function canEditSetMembers(set){
+  return !!set&&!set.archived&&(set.activeMatchIndex||0)===0&&!set.matches.some(match=>
+    match.skipped||(match.currentGameIndex||0)>0||Object.entries(match).some(([key,value])=>(key==="throws"||/^game\d+$/.test(key))&&Array.isArray(value)&&value.length));
+}
+function setMemberNames(set){return set.sides.flatMap(side=>isTeamSet(set.type)?side.players:[side.name]);}
+async function removeRoomParticipant(name){
+  if(setMemberSaving||!currentPlayer)return false;
+  if(isFixedHomeMember(name)){alert("固定8人は削除できません。参加チェックで調整してください。");return false;}
+  if(getActiveSetMembers(data).has(name)){alert("未終了のセットに参加中です。セットから外して保存するか、セット終了後に削除してください。");return false;}
+  if(!confirm(`${name}を部屋の参加者一覧から削除します。過去の成績とホーム候補は残ります。よろしいですか？`))return false;
+  setMemberSaving=true;
+  try{
+    const registered=data.players.includes(name);
+    const saved=registered?await mutate(d=>{
+      if(isFixedHomeMember(name)||getActiveSetMembers(d).has(name))throw Error("未終了のセットに参加中のため削除できません。最新の内容を確認してください。");
+      d.players=d.players.filter(player=>player!==name);
+    }):true;
+    if(!saved){$("set-members-status").textContent="削除できませんでした。最新の内容を確認してください。";return false;}
+    if(setMemberDraft)setMemberDraft.rows=setMemberDraft.rows.filter(row=>row.name!==name);
+    renderSetMemberRows();$("set-members-status").textContent=`${name}を削除しました。過去の成績とホーム候補は保持しています。`;return true;
+  }catch(error){$("set-members-status").textContent=`削除できませんでした：${error.message}`;return false;}
+  finally{setMemberSaving=false;const set=data.sets[cur];if(set&&view==="set")renderSetMemberEditor(set);}
+}
+function renderSetMemberRows(){
+  const draft=setMemberDraft;if(!draft)return;
+  const locked=setMemberSaving||!currentPlayer||!canEditSetMembers(data.sets.find(set=>set.id===draft.id));
+  $("set-members-editor").innerHTML=draft.rows.map((row,index)=>{
+    const chosen=row.side>=0?row.side:(row.lastSide||0);
+    const busy=getActiveSetMembers(data).has(row.name);
+    const removeButton=isFixedHomeMember(row.name)?"":`<button type="button" class="sub" data-set-member-remove="${index}" ${!currentPlayer||setMemberSaving||busy?"disabled":""} title="${busy?"未終了セットから外して保存した後に削除できます":"部屋の参加者一覧から削除（過去成績は保持）"}" style="font-size:12px;padding:4px 8px;">削除</button>`;
+    return `<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap;"><label style="display:inline-flex;align-items:center;gap:6px;margin:0;"><input type="checkbox" data-set-member-check="${index}" ${row.side>=0?"checked":""} ${locked?"disabled":""} style="width:18px;height:18px;margin:0;">${esc(row.name)}</label>${draft.teams.length>1?`<select data-set-member-team="${index}" aria-label="${esc(row.name)}の所属チーム" ${locked||row.side<0?"disabled":""} style="width:auto;">${draft.teams.map((name,i)=>`<option value="${i}" ${chosen===i?"selected":""}>${esc(name)}</option>`).join("")}</select>`:""}${removeButton}</div>`;
+  }).join("");
+  document.querySelectorAll("[data-set-member-remove]").forEach(button=>button.onclick=()=>removeRoomParticipant(draft.rows[Number(button.dataset.setMemberRemove)].name));
+  document.querySelectorAll("[data-set-member-check]").forEach(box=>box.onchange=()=>{
+    const row=draft.rows[Number(box.dataset.setMemberCheck)];
+    if(box.checked)row.side=row.lastSide||0;
+    else{row.lastSide=row.side;row.side=-1;}
+    renderSetMemberRows();
+  });
+  document.querySelectorAll("[data-set-member-team]").forEach(select=>select.onchange=()=>{
+    const row=draft.rows[Number(select.dataset.setMemberTeam)];row.side=Number(select.value);row.lastSide=row.side;
+  });
+}
+function renderSetMemberEditor(set){
+  const editable=canEditSetMembers(set),baseline=setMemberFingerprint(set);
+  if(!setMemberDraft||setMemberDraft.id!==set.id||setMemberDraft.baseline!==baseline){
+    const names=[...new Set([...setMemberNames(set),...data.players,...FIXED_HOME_MEMBERS])];
+    setMemberDraft={id:set.id,baseline,teams:isTeamSet(set.type)?set.sides.map(side=>side.name):["参加する"],rows:names.map(name=>({name,roomMember:data.players.includes(name),side:isTeamSet(set.type)?set.sides.findIndex(side=>side.players.includes(name)):set.sides.some(side=>side.name===name)?0:-1}))};
+    $("set-members-card").open=false;$("set-members-status").textContent="";
+    renderSetMemberRows();
+  }
+  const existingNames=new Set(setMemberNames(set));
+  const visibleRows=setMemberDraft.rows.filter(row=>!row.roomMember||data.players.includes(row.name)||existingNames.has(row.name));
+  if(visibleRows.length!==setMemberDraft.rows.length){setMemberDraft.rows=visibleRows;renderSetMemberRows();}
+  document.querySelectorAll("[data-set-member-remove]").forEach(button=>button.disabled=!currentPlayer||setMemberSaving||getActiveSetMembers(data).has(setMemberDraft.rows[Number(button.dataset.setMemberRemove)].name));
+  $("set-members-save").disabled=!editable||!currentPlayer||setMemberSaving;
+  $("set-member-add").disabled=!editable||!currentPlayer||setMemberSaving;
+  document.querySelectorAll("[data-set-member-check]").forEach(box=>box.disabled=!editable||!currentPlayer||setMemberSaving);
+  document.querySelectorAll("[data-set-member-team]").forEach(select=>select.disabled=!editable||!currentPlayer||setMemberSaving||setMemberDraft.rows[Number(select.dataset.setMemberTeam)].side<0);
+  if(!editable)$("set-members-status").textContent="投球開始後・終了済みのセットは参加者を変更できません。";
+}
+$("set-member-add").onclick=()=>{
+  const name=$("set-member-name").value.trim();if(!name||!setMemberDraft||setMemberSaving)return;
+  if(setMemberDraft.rows.some(row=>row.name===name)){alert("同じ名前が候補にあります。参加先を選んでください。");return;}
+  setMemberDraft.rows.push({name,side:setMemberDraft.teams.length===1?0:-1});$("set-member-name").value="";renderSetMemberRows();
+};
+$("set-members-save").onclick=async()=>{
+  if(setMemberSaving||!setMemberDraft)return false;
+  const draft=structuredClone(setMemberDraft),set=data.sets.find(item=>item.id===draft.id);
+  if(!set||!canEditSetMembers(set)||setMemberFingerprint(set)!==draft.baseline){alert("セットが更新されています。内容を確認してください。");return false;}
+  const sides=isTeamSet(set.type)?draft.teams.map((name,i)=>({name,players:draft.rows.filter(row=>row.side===i).map(row=>row.name)})).filter(side=>side.players.length):draft.rows.filter(row=>row.side===0).map(row=>({name:row.name,players:[row.name]}));
+  if(sides.length<2||(isTournamentSet(set.type)&&(sides.length<3||sides.length>8))||(set.type==="team_league"&&sides.length<3)){alert("個人戦・団体戦は2サイド以上、団体リーグは3チーム以上、トーナメントは3～8サイド必要です。");return false;}
+  const oldNames=setMemberNames(set),newNames=sides.flatMap(side=>isTeamSet(set.type)?side.players:[side.name]);
+  if(JSON.stringify(sides)===JSON.stringify(set.sides)){ $("set-members-status").textContent="参加者の変更はありません。";$("set-members-card").open=false;return true;}
+  if(!confirm("参加者を変更し、対戦表・ブロック設定・投球順の調整を作り直します。よろしいですか？"))return false;
+  const config={};for(const key of ["type","name","mode","games","missRule","overRule","firstRule","gameFirstRule","tournamentMode"])if(set[key]!==undefined)config[key]=set[key];
+  config.sides=sides;config.fixedBracketOrder=true;
+  setMemberSaving=true;renderSetMemberEditor(set);
+  try{
+    const saved=await createSet(config,{id:set.id,baseline:draft.baseline});
+    if(!saved){$("set-members-status").textContent="保存できませんでした。最新の内容を確認してください。";return false;}
+    for(const name of newNames)if(!oldNames.includes(name))rememberRoomMemberAtHome(name);
+    captureHomeMemberSelection();
+    for(const name of oldNames)if(isFixedHomeMember(name)&&!newNames.includes(name))homeMemberSelection.delete(name);
+    saveHomeMembers();renderHomeMembers();
+    blockEditorStates.delete(set.id);setMemberDraft=null;render();
+    $("set-members-card").open=false;$("set-members-status").textContent="参加者を保存しました。必要に応じてブロック設定・投球順を設定してください。";return true;
+  }catch(error){$("set-members-status").textContent=`保存できませんでした：${error.message}`;return false;}
+  finally{setMemberSaving=false;const latest=data.sets.find(item=>item.id===draft.id);if(latest&&data.sets[cur]?.id===draft.id)renderSetMemberEditor(latest);}
+};
+
 function renderSet(set){
   if(set.archived)selectedThrow=null;
   if(set.activeMatchIndex === undefined&&!set.archived) set.activeMatchIndex = 0;
@@ -3328,6 +3469,9 @@ function renderSet(set){
   const matchOver = matchWinnerIdx !== null;
 
   const S = summarize(set);
+  $("delete-unstarted-set").classList.toggle("hide",!currentPlayer||!canEditSetMembers(set));
+  $("delete-unstarted-set").disabled=deleteSetBusy;
+  renderSetMemberEditor(set);
   renderSoloBlockConfig(set);
   renderFutureGameSettings(set);
   $("archive-set").classList.toggle("hide",!isAdmin()||S.over);
@@ -3682,11 +3826,12 @@ function historyEntryComparable(entry){
 }
 function drawHistorySetList(){
   const typeNames={solo:"個人フリー",team:"団体戦",league:"個人リーグ",team_league:"団体リーグ",tournament:"個人トーナメント",team_tournament:"団体トーナメント"};
-  $("setlist").innerHTML=data.sets.length?"<div style='overflow-x:auto'><table><tr><th>セット名</th><th>種類</th><th>状態</th><th>生涯成績への保存</th></tr>"+data.sets.map(set=>{
+  $("setlist").innerHTML=data.sets.length?"<div style='overflow-x:auto'><table><tr><th>セット名</th><th>種類</th><th>状態</th><th>生涯成績への保存</th><th>操作</th></tr>"+data.sets.map(set=>{
     const status=set.archived?"中断終了":summarize(set).over?"終了":hasSetThrows(set)?"進行中":"未開始";
     const saved=room==="9999"?"対象外（テスト部屋）":historyLabels.get(String(set.id))||"確認中";
-    return `<tr><td>${esc(set.name||"名称なし")}</td><td>${esc(typeNames[set.type]||set.type||"不明")}</td><td>${status}</td><td>${esc(saved)}</td></tr>`;
+    return `<tr><td>${esc(set.name||"名称なし")}</td><td>${esc(typeNames[set.type]||set.type||"不明")}</td><td>${status}</td><td>${esc(saved)}</td><td>${currentPlayer&&canEditSetMembers(set)?`<button type="button" class="sub" data-delete-unstarted-set="${esc(set.id)}" ${deleteSetBusy?"disabled":""}>削除</button>`:""}</td></tr>`;
   }).join("")+"</table></div><p class='pl'>保存状態は現在のセットと保存内容を比較しています。別端末の訂正も再確認します。</p>":"この部屋にはまだセットがありません。";
+  document.querySelectorAll("[data-delete-unstarted-set]").forEach(button=>button.onclick=()=>deleteUnstartedSet(button.dataset.deleteUnstartedSet));
 }
 async function refreshHistorySetList(){
   const signature=JSON.stringify([room,roomSyncBlocked,data?.sets,historyWatchKnown,historyWatchError,historyWatchRecord,$("history-day").value]);
