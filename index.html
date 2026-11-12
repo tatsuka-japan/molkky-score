@@ -72,7 +72,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.52</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.53</span></h1>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -2126,7 +2126,7 @@ async function mutate(fn,options={}){
     if(fn(d)===false)return;
     for(const [id,snapshot] of protectedSets){
       const set=d.sets.find(item=>item.id===id);
-      if(!set&&id===options.deleteEmptyArchivedSetId&&!hasSetThrows(JSON.parse(snapshot)))continue;
+      if(!set&&id===options.deleteUnfinishedArchivedSetId&&canDeleteArchivedSet(JSON.parse(snapshot)))continue;
       if(!set||JSON.stringify(set)!==snapshot)throw Error("中断保存済みのセットは変更できません。");
     }
     applyNextMatchScoreOrder(d,beforeIndices);
@@ -3363,22 +3363,34 @@ function ordinaryProgressText(set,match){
 }
 
 let deleteSetBusy=false;
+function canDeleteArchivedSet(set){
+  if(!set?.archived||Number(set.archivedCompletedGames)>0)return false;
+  try{
+    return !set.matches.some(match=>{
+      const sides=match.customSides||match.sides;
+      const completed=(values,index)=>values.length&&replay(sides,values,getGameStart(match,index),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,index)).winner!==null;
+      if(recordedGameIndices(match).some(index=>completed(getGameThrows(match,index),index)))return true;
+      // 古い形式のthrowsだけに完了記録がある場合も保護する。
+      return Array.isArray(match.throws)&&completed(match.throws,match.currentGameIndex||0);
+    });
+  }catch(error){return false;}
+}
 function canDeleteSet(set){
-  return !!set&&(set.archived?!hasSetThrows(set):canEditSetMembers(set));
+  return !!set&&(set.archived?canDeleteArchivedSet(set):canEditSetMembers(set));
 }
 async function deleteUnstartedSet(id){
   if(deleteSetBusy||!currentPlayer)return false;
   const set=data.sets.find(item=>item.id===id);
-  if(!canDeleteSet(set)){alert("投球記録のあるセット、または進行済みのセットは削除できません。");return false;}
+  if(!canDeleteSet(set)){alert("完了したゲームがある中断セットや、投球を開始した未中断セットは削除できません。");return false;}
   const baseline=setMemberFingerprint(set);
-  if(!confirm(`${set.archived?"投球記録のない中断終了セット":"未開始セット"}「${set.name}」を削除します。参加者の登録は残ります。よろしいですか？`))return false;
+  if(!confirm(`${set.archived?"完了ゲームのない中断終了セット":"未開始セット"}「${set.name}」を削除します。${set.archived?"途中までの投球記録も削除され、元に戻せません。":""}参加者の登録は残ります。よろしいですか？`))return false;
   deleteSetBusy=true;
   try{
     const saved=await mutate(d=>{
       const target=d.sets.find(item=>item.id===id);
       if(!canDeleteSet(target)||setMemberFingerprint(target)!==baseline)throw Error("セットが更新されたか投球が開始されました。最新の内容を確認してください。");
       d.sets=d.sets.filter(item=>item.id!==id);
-    },{deleteEmptyArchivedSetId:id});
+    },{deleteUnfinishedArchivedSetId:id});
     if(!saved)return false;
     data.sets=data.sets.filter(item=>item.id!==id);
     invalidateBlockEditor(id);if(setMemberDraft?.id===id)setMemberDraft=null;
