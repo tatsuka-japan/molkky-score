@@ -72,7 +72,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.53</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.55</span></h1>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -212,34 +212,6 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="final"></div>
-<details id="future-games-card" class="card hide" style="background:#eef4fb;">
-<summary style="font-weight:bold;cursor:pointer;">管理者：予定ゲーム数・対戦方式の変更</summary>
-<p class="pl">入力済みの記録と確定済みの勝者は保持します。</p>
-<label id="future-games-mode-box">今後の対戦方式 <select id="future-games-mode"><option value="game1">1本勝負</option><option value="game2_wins">2本先取</option><option value="match_total">合計得点</option></select></label>
-<label id="future-games-number-box"><span id="future-games-number-label">ゲーム数</span> <input id="future-games-count" type="number" min="1" max="99" value="1" style="width:80px;"></label>
-<div id="future-games-preview" class="pl"></div>
-<button id="save-future-games" type="button" class="sub">未開始の試合に適用</button>
-<div id="future-games-status" class="pl" role="status" aria-live="polite"></div>
-<div id="future-games-history" class="pl"></div>
-</details>
-<details id="set-members-card" class="card"><summary>セットの参加者を追加・削除</summary><p class="pl">最初の投球前のみ変更できます。リーグ由来の決勝トーナメントでは元リーグ情報・先攻条件を維持し、新しく追加した人・チームは既存の順位の後に順位を付けます。保存すると対戦表・ブロック設定・投球順の調整を作り直します。参加する人にチェックを入れてください。団体戦は所属チームも選択してください。チェックを外すだけでは部屋の参加者・過去成績は残ります。固定8人以外の「削除」は、未終了セットに参加していない人を部屋の一覧から削除します（過去成績・ホーム候補は保持）。</p><div id="set-members-editor"></div><input id="set-member-name" placeholder="新しい参加者名"><button type="button" class="sub" id="set-member-add">候補に追加</button><p><button type="button" id="set-members-save">参加者を保存</button></p><div id="set-members-status" class="pl" role="status"></div></details>
-<div id="solo-block-card" class="card hide" style="background:#eef4fb;">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="block-config-title">ブロック設定</b><button type="button" class="sub" id="toggle-block-config" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
-<div id="block-config-content">
-<p class="pl" id="block-config-desc">参加者を1～3ブロックに分けます。試合開始前に設定してください。</p>
-<label>ブロック数 <select id="solo-block-count"><option value="1">1ブロック</option><option value="2">2ブロック</option><option value="3">3ブロック</option></select></label>
-<button type="button" class="sub" id="random-solo-blocks" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにブロック分け</button>
-<div id="solo-block-assignments"></div>
-<button type="button" class="sub" id="save-solo-blocks">ブロック設定を保存</button>
-<button type="button" class="sub" id="reset-block-draft">保存済み設定に戻す</button>
-</div>
-<span id="solo-block-status" class="pl" role="status" aria-live="polite"></span>
-</div>
-<div id="tournament-overview" class="card hide" style="background:#faf8f5;">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="tournament-overview-title">🌳 トーナメント表 / 対戦スケジュール</b><button type="button" class="sub" id="toggle-tournament-overview" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
-<div id="tournament-tree-content"></div>
-</div>
-<div id="board"></div>
 <div class="card" id="match-order-card" style="background:#faf8f5; border:1px dashed #ccc; padding:8px; margin-bottom:10px; border-radius:8px;">
 <div style="display:flex; justify-content:space-between; align-items:center;">
 <b>📝 対戦オーダー・投げる順番（先攻・後攻）調整</b>
@@ -252,6 +224,7 @@ td.l,th.l{text-align:left}
 <div id="order-save-status" class="pl" role="status" aria-live="polite"></div>
 </div>
 </div>
+<div id="board"></div>
 <div id="pad-area">
 <div class="card">
 <div class="big" id="turn"></div>
@@ -269,6 +242,33 @@ td.l,th.l{text-align:left}
 </div>
 <div class="card"><b>この試合の投球履歴</b><div id="log" class="pl"></div></div>
 <div class="card"><b>試合結果</b><div id="results"></div></div>
+<div id="tournament-overview" class="card hide" style="background:#faf8f5;">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="tournament-overview-title">🌳 トーナメント表 / 対戦スケジュール</b><button type="button" class="sub" id="toggle-tournament-overview" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
+<div id="tournament-tree-content"></div>
+</div>
+<details id="set-members-card" class="card"><summary>セットの参加者を追加・削除</summary><p class="pl">最初の投球前のみ変更できます。リーグ由来の決勝トーナメントでは元リーグ情報・先攻条件を維持し、新しく追加した人・チームは既存の順位の後に順位を付けます。保存すると対戦表・ブロック設定・投球順の調整を作り直します。参加する人にチェックを入れてください。団体戦は所属チームも選択してください。チェックを外すだけでは部屋の参加者・過去成績は残ります。固定8人以外の「削除」は、未終了セットに参加していない人を部屋の一覧から削除します（過去成績・ホーム候補は保持）。</p><div id="set-members-editor"></div><input id="set-member-name" placeholder="新しい参加者名"><button type="button" class="sub" id="set-member-add">候補に追加</button><p><button type="button" id="set-members-save">参加者を保存</button></p><div id="set-members-status" class="pl" role="status"></div></details>
+<div id="solo-block-card" class="card hide" style="background:#eef4fb;">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="block-config-title">ブロック設定</b><button type="button" class="sub" id="toggle-block-config" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
+<div id="block-config-content">
+<p class="pl" id="block-config-desc">参加者を1～3ブロックに分けます。試合開始前に設定してください。</p>
+<label>ブロック数 <select id="solo-block-count"><option value="1">1ブロック</option><option value="2">2ブロック</option><option value="3">3ブロック</option></select></label>
+<button type="button" class="sub" id="random-solo-blocks" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにブロック分け</button>
+<div id="solo-block-assignments"></div>
+<button type="button" class="sub" id="save-solo-blocks">ブロック設定を保存</button>
+<button type="button" class="sub" id="reset-block-draft">保存済み設定に戻す</button>
+</div>
+<span id="solo-block-status" class="pl" role="status" aria-live="polite"></span>
+</div>
+<details id="future-games-card" class="card hide" style="background:#eef4fb;">
+<summary style="font-weight:bold;cursor:pointer;">管理者：予定ゲーム数・対戦方式の変更</summary>
+<p class="pl">入力済みの記録と確定済みの勝者は保持します。</p>
+<label id="future-games-mode-box">今後の対戦方式 <select id="future-games-mode"><option value="game1">1本勝負</option><option value="game2_wins">2本先取</option><option value="match_total">合計得点</option></select></label>
+<label id="future-games-number-box"><span id="future-games-number-label">ゲーム数</span> <input id="future-games-count" type="number" min="1" max="99" value="1" style="width:80px;"></label>
+<div id="future-games-preview" class="pl"></div>
+<button id="save-future-games" type="button" class="sub">未開始の試合に適用</button>
+<div id="future-games-status" class="pl" role="status" aria-live="polite"></div>
+<div id="future-games-history" class="pl"></div>
+</details>
 </div>
 <div id="v-stats" class="hide">
 <div class="card"><b>セット一覧</b><div id="setlist"></div></div>
@@ -1881,9 +1881,22 @@ window.sortSolo = (btn, direction) => {
   }
 };
 
+let orderCollapseState={key:"",started:false};
+function applyOrderAutoCollapse(set,match){
+  const gameIndex=match.currentGameIndex||0;
+  const key=JSON.stringify([room,set.id,set.activeMatchIndex||0,gameIndex]);
+  const started=getGameThrows(match,gameIndex).length>0;
+  if(orderCollapseState.key!==key){
+    if(orderCollapseState.key&&!started)isOrderHidden=false;
+    orderCollapseState={key,started:false};
+  }
+  if(started&&!orderCollapseState.started)isOrderHidden=true;
+  orderCollapseState.started=orderCollapseState.started||started;
+}
 function renderNextOrderForm(set) {
   if(set.archived){$("match-order-card").style.display="none";return;}
   const current=set.matches[set.activeMatchIndex||0];
+  applyOrderAutoCollapse(set,current);
   const key=JSON.stringify([set.id,set.activeMatchIndex||0,current.currentGameIndex||0,current.customSides||current.sides,getGameStart(current,current.currentGameIndex||0),getGameSideOrder(current,current.currentGameIndex||0),getGameThrows(current,current.currentGameIndex||0)]);
   $("match-order-card").style.display="block";
   $("order-edit-content").style.display=isOrderHidden?"none":"block";
