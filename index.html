@@ -45,8 +45,12 @@ label{display:block;margin-top:6px}
 table{border-collapse:collapse;width:100%;font-size:13px}
 td,th{border-bottom:1px solid #ddd;padding:4px;text-align:center}
 td.l,th.l{text-align:left}
-.match-timer-box{display:flex;align-items:center;gap:8px;background:#eef4fb;padding:4px 10px;border-radius:6px}
-.match-timer{font-size:16px;font-weight:bold;color:#3b6ea8}
+.score-pad-layout{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.match-timer-box{grid-column:2 / -1;justify-self:end;width:max-content;max-width:100%;display:flex;align-items:center;justify-content:space-evenly;gap:4px;background:#fff0c2;padding:4px 6px;border:1px solid #e5a832;border-radius:10px;box-sizing:border-box;min-width:calc((100% - 16px)/3)}
+.score-pad-layout.timer-only .match-timer-box{grid-column:1 / -1;min-width:0}
+.match-timer-box button.sub{font-size:12px;min-height:38px;padding:4px 6px;white-space:nowrap}
+.match-timer-box #timer-reset-btn{background:#c33}
+.match-timer{font-size:clamp(16px,4.7vw,22px);font-weight:bold;color:#3b6ea8;font-variant-numeric:tabular-nums;white-space:nowrap}
 .disabled-member{color:#aaa;text-decoration:line-through;}
 .miss-streak{display:inline-block;margin:3px 0;padding:3px 8px;border-radius:6px;background:#fff0e6;color:#b42318;font-size:15px;font-weight:700;border:1px solid #e7a18e;}
 .ver-badge{display:inline-block;background:#3b6ea8;color:#fff;font-size:11px;padding:2px 6px;border-radius:4px;vertical-align:middle;margin-left:6px;}
@@ -72,7 +76,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.55</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.66</span></h1>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -204,14 +208,22 @@ td.l,th.l{text-align:left}
 <div class="card">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
 <div><b id="setname"></b> <span class="pl" id="setinfo"></span></div>
-<div class="match-timer-box" title="このゲームの共有タイマー。操作は参加者のみ。">
-<div id="match-timer-display" class="match-timer">⏱️ 00:00</div>
-<button type="button" id="timer-start-btn" class="sub" style="font-size:13px; padding:4px 10px;">スタート</button>
-<button type="button" id="timer-reset-btn" class="sub" style="font-size:13px; padding:4px 10px; background:#c33;">リセット</button>
-</div>
+
 </div>
 </div>
 <div id="final"></div>
+<div id="solo-block-card" class="card hide" style="background:#eef4fb;">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="block-config-title">ブロック設定</b><button type="button" class="sub" id="toggle-block-config" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
+<div id="block-config-content">
+<p class="pl" id="block-config-desc">参加者を1～3ブロックに分けます。試合開始前に設定してください。</p>
+<label>ブロック数 <select id="solo-block-count"><option value="1">1ブロック</option><option value="2">2ブロック</option><option value="3">3ブロック</option></select></label>
+<button type="button" class="sub" id="random-solo-blocks" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにブロック分け</button>
+<div id="solo-block-assignments"></div>
+<button type="button" class="sub" id="save-solo-blocks">ブロック設定を保存</button>
+<button type="button" class="sub" id="reset-block-draft">保存済み設定に戻す</button>
+</div>
+<span id="solo-block-status" class="pl" role="status" aria-live="polite"></span>
+</div>
 <div class="card" id="match-order-card" style="background:#faf8f5; border:1px dashed #ccc; padding:8px; margin-bottom:10px; border-radius:8px;">
 <div style="display:flex; justify-content:space-between; align-items:center;">
 <b>📝 対戦オーダー・投げる順番（先攻・後攻）調整</b>
@@ -228,8 +240,16 @@ td.l,th.l{text-align:left}
 <div id="pad-area">
 <div class="card">
 <div class="big" id="turn"></div>
+
 <div id="sync-notice" class="sync-notice" role="status" aria-live="polite"></div>
-<div class="grid" id="pad"></div>
+<div id="score-pad-layout" class="score-pad-layout">
+<div class="grid" id="pad" style="display:contents;"></div>
+<div class="match-timer-box" title="このゲームの共有タイマー。操作は参加者のみ。">
+<div><div id="match-timer-display" class="match-timer">⏱️ 00:00</div></div>
+<button type="button" id="timer-start-btn" class="sub">スタート</button>
+<button type="button" id="timer-reset-btn" class="sub">リセット</button>
+</div>
+</div>
 <p><button class="go hide" id="next">次の対戦へ進む</button></p>
 <p><button class="sub" id="undo">修正</button>
 <button class="sub" id="return-live">最新</button><span id="edit-throw-status" role="status"></span>
@@ -243,22 +263,10 @@ td.l,th.l{text-align:left}
 <div class="card"><b>この試合の投球履歴</b><div id="log" class="pl"></div></div>
 <div class="card"><b>試合結果</b><div id="results"></div></div>
 <div id="tournament-overview" class="card hide" style="background:#faf8f5;">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="tournament-overview-title">🌳 トーナメント表 / 対戦スケジュール</b><button type="button" class="sub" id="toggle-tournament-overview" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
-<div id="tournament-tree-content"></div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="tournament-overview-title">🌳 トーナメント表 / 対戦スケジュール</b><button type="button" class="sub" id="toggle-tournament-overview" style="font-size:12px;padding:4px 8px;">展開する</button></div>
+<div id="tournament-tree-content" style="display:none;"></div>
 </div>
 <details id="set-members-card" class="card"><summary>セットの参加者を追加・削除</summary><p class="pl">最初の投球前のみ変更できます。リーグ由来の決勝トーナメントでは元リーグ情報・先攻条件を維持し、新しく追加した人・チームは既存の順位の後に順位を付けます。保存すると対戦表・ブロック設定・投球順の調整を作り直します。参加する人にチェックを入れてください。団体戦は所属チームも選択してください。チェックを外すだけでは部屋の参加者・過去成績は残ります。固定8人以外の「削除」は、未終了セットに参加していない人を部屋の一覧から削除します（過去成績・ホーム候補は保持）。</p><div id="set-members-editor"></div><input id="set-member-name" placeholder="新しい参加者名"><button type="button" class="sub" id="set-member-add">候補に追加</button><p><button type="button" id="set-members-save">参加者を保存</button></p><div id="set-members-status" class="pl" role="status"></div></details>
-<div id="solo-block-card" class="card hide" style="background:#eef4fb;">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="block-config-title">ブロック設定</b><button type="button" class="sub" id="toggle-block-config" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
-<div id="block-config-content">
-<p class="pl" id="block-config-desc">参加者を1～3ブロックに分けます。試合開始前に設定してください。</p>
-<label>ブロック数 <select id="solo-block-count"><option value="1">1ブロック</option><option value="2">2ブロック</option><option value="3">3ブロック</option></select></label>
-<button type="button" class="sub" id="random-solo-blocks" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにブロック分け</button>
-<div id="solo-block-assignments"></div>
-<button type="button" class="sub" id="save-solo-blocks">ブロック設定を保存</button>
-<button type="button" class="sub" id="reset-block-draft">保存済み設定に戻す</button>
-</div>
-<span id="solo-block-status" class="pl" role="status" aria-live="polite"></span>
-</div>
 <details id="future-games-card" class="card hide" style="background:#eef4fb;">
 <summary style="font-weight:bold;cursor:pointer;">管理者：予定ゲーム数・対戦方式の変更</summary>
 <p class="pl">入力済みの記録と確定済みの勝者は保持します。</p>
@@ -505,7 +513,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const uniq=a=>[...new Set(a)];
 let room=null,data=null,unsub=null,cur=-1,view="new",prevLen=-1,sig="",firstSnap=true;
 let isOrderHidden = false; 
-let isScheduleHidden = false;
+let isScheduleHidden = true;
 let isBlockConfigHidden = false;
 let tournamentModeManuallySet = false;
 let selectedThrow=null;
@@ -2133,6 +2141,7 @@ async function mutate(fn,options={}){
     const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
     if(!hasPlayerSession(d)){alert("この名前の利用権限がありません。名前を選び直してください。");return;}
     recoverSkippedActiveMatch(d);
+    const beforeSharedTimers=d.sharedTimers;
     const beforeCapacityProfile=firestoreCapacityProfile(ref.path||"rooms/"+room,d);
     const beforeIndices=new Map(d.sets.map(set=>[set.id,set.activeMatchIndex||0]));
     const protectedSets=new Map(d.sets.filter(set=>set.archived).map(set=>[set.id,JSON.stringify(set)]));
@@ -2146,7 +2155,8 @@ async function mutate(fn,options={}){
     for(const set of d.sets.filter(set=>!set.archived))for(const match of set.matches){
       if(Array.isArray(match.gameOrders))match.gameOrders=Object.fromEntries(Object.entries(match.gameOrders).filter(([,order])=>Array.isArray(order)));
     }
-    const timersChanged=settleSharedTimers(d);
+    const timersSettled=settleSharedTimers(d);
+    const timersChanged=timersSettled||d.sharedTimers!==beforeSharedTimers;
     try{capacityUpdate(tx,ref,d,{players:d.players,sets:d.sets,...(timersChanged?{sharedTimers:d.sharedTimers}:{})},beforeCapacityProfile);}
     catch(error){if(error.code==='capacity-limit'){sizeLimitExceeded=error.message;return;}throw error;}
     return true;
@@ -2443,6 +2453,7 @@ async function add(pts){
     if(replay(match.customSides||match.sides,match[gameKey],getGameStart(match,gIdx),isTeamSet(s.type),s.missRule,s.overRule,getGameSideOrder(match,gIdx)).winner!==null){staleInput=true;return false;}
     match[gameKey].push(pts);
     match.throws = match[gameKey];
+    autoStartSharedTimer(d,s,activeIdx,gIdx);
   });
   if(staleInput){scoreSaveMessage="記録が更新されたため入力を保存しませんでした。最新の得点を確認してください。";return false;}
   if(!saved)throw Error("入力を保存できませんでした。利用権限・通信状態・保存容量を確認してください。");
@@ -3039,6 +3050,30 @@ function sharedTimerFinished(set,target){
   if(!sides?.length||sides.some(side=>!side))return true;
   return replay(sides,getGameThrows(match,target.gi),getGameStart(match,target.gi),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,target.gi)).winner!==null;
 }
+function autoStartSharedTimer(d,set,mi,gi){
+  const target=sharedTimerTarget(set,mi,gi);if(!target?.participants)return false;
+  const old=sharedTimerValue(d,target);
+  if(old?.running||sharedTimerFinished(set,target))return false;
+  d.sharedTimers={...(d.sharedTimers||{}),[target.key]:{sid:target.sid,mi,gi,participants:target.participants,revision:(old?.revision||0)+1,elapsedMs:sharedTimerElapsed(old),running:true,matchStartedAt:serverTimestamp(),pausedAt:null}};
+  return true;
+}
+function setElapsedTime(set,d,now=Date.now()){
+  let elapsed=0,measured=false,running=false;
+  for(const record of Object.values(d.sharedTimers||{})){
+    if(record.sid!==String(set.id))continue;
+    const target=sharedTimerTarget(set,record.mi,record.gi);
+    if(!target||!sameTimerParticipants(record.participants,target.participants))continue;
+    measured=true;elapsed+=sharedTimerElapsed(record,now);running=running||!!record.running;
+  }
+  if(!measured)return "—";
+  const seconds=Math.floor(elapsed/1000),minutes=Math.floor(seconds/60),hours=Math.floor(minutes/60);
+  const text=hours?`${hours}:${String(minutes%60).padStart(2,"0")}:${String(seconds%60).padStart(2,"0")}`:`${String(minutes).padStart(2,"0")}:${String(seconds%60).padStart(2,"0")}`;
+  return text+(running?"（計測中）":"");
+}
+setInterval(()=>{
+  if(view!=="stats"||!data)return;
+  document.querySelectorAll("[data-set-elapsed]").forEach(cell=>{const set=data.sets.find(item=>String(item.id)===cell.dataset.setElapsed);if(set)cell.textContent=setElapsedTime(set,data);});
+},1000);
 function settleSharedTimers(d){
   let changed=false;
   for(const [key,record] of Object.entries(d.sharedTimers||{})){
@@ -3740,7 +3775,8 @@ function renderSet(set){
   if(selectedThrow&&(selectedThrow.sid!==set.id||selectedThrow.mi!==activeIdx||selectedThrow.gi!==gIdx||selectedThrow.snapshot!==JSON.stringify(throwsList)))selectedThrow=null;
   $("edit-throw-status").textContent=selectedThrow?`第${selectedThrow.index+1}投（${throwsList[selectedThrow.index]}点）を選択中。点数ボタンで修正`:"";
   const myTurn = selectedThrow?correctionAllowed(data,set,m,selectedThrow.index):isMyTurn();
-  $("pad").style.display = myTurn ? "grid" : "none";
+  $("pad").style.display = myTurn ? "contents" : "none";
+  $("score-pad-layout").classList.toggle("timer-only",!myTurn);
   $("input-lock-msg").style.display = myTurn ? "none" : "block";
   $("input-lock-msg").textContent=set.archived?"中断保存済みのため、記録は閲覧のみです。":"🔒 現在はあなたのチーム（またはあなた）の番ではないため、スコア入力できません";
 
@@ -3892,11 +3928,11 @@ function historyEntryComparable(entry){
 }
 function drawHistorySetList(){
   const typeNames={solo:"個人フリー",team:"団体戦",league:"個人リーグ",team_league:"団体リーグ",tournament:"個人トーナメント",team_tournament:"団体トーナメント"};
-  $("setlist").innerHTML=data.sets.length?"<div style='overflow-x:auto'><table><tr><th>セット名</th><th>種類</th><th>状態</th><th>生涯成績への保存</th><th>操作</th></tr>"+data.sets.map(set=>{
+  $("setlist").innerHTML=data.sets.length?"<div style='overflow-x:auto'><table><tr><th>セット名</th><th>種類</th><th>状態</th><th>ゲーム数</th><th>計測時間</th><th>生涯成績への保存</th><th>操作</th></tr>"+data.sets.map(set=>{
     const status=set.archived?"中断終了":summarize(set).over?"終了":hasSetThrows(set)?"進行中":"未開始";
     const saved=room==="9999"?"対象外（テスト部屋）":historyLabels.get(String(set.id))||"確認中";
-    return `<tr><td>${esc(set.name||"名称なし")}</td><td>${esc(typeNames[set.type]||set.type||"不明")}</td><td>${status}</td><td>${esc(saved)}</td><td>${currentPlayer&&canDeleteSet(set)?`<button type="button" class="sub" data-delete-unstarted-set="${esc(set.id)}" ${deleteSetBusy?"disabled":""}>削除</button>`:""}</td></tr>`;
-  }).join("")+"</table></div><p class='pl'>保存状態は現在のセットと保存内容を比較しています。別端末の訂正も再確認します。</p>":"この部屋にはまだセットがありません。";
+    return `<tr><td>${esc(set.name||"名称なし")}</td><td>${esc(typeNames[set.type]||set.type||"不明")}</td><td>${status}</td><td>${archiveCompletedGames(set)}</td><td data-set-elapsed="${esc(set.id)}">${esc(setElapsedTime(set,data))}</td><td>${esc(saved)}</td><td>${currentPlayer&&canDeleteSet(set)?`<button type="button" class="sub" data-delete-unstarted-set="${esc(set.id)}" ${deleteSetBusy?"disabled":""}>削除</button>`:""}</td></tr>`;
+  }).join("")+"</table></div><p class='pl'>ゲーム数は完了したゲームのみ（延長を含む）。未実施・スキップ・勝敗未確定の中断は含みません。保存状態は現在のセットと保存内容を比較しています。別端末の訂正も再確認します。</p>":"この部屋にはまだセットがありません。";
   document.querySelectorAll("[data-delete-unstarted-set]").forEach(button=>button.onclick=()=>deleteUnstartedSet(button.dataset.deleteUnstartedSet));
 }
 async function refreshHistorySetList(){
