@@ -76,7 +76,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.68</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.69</span></h1>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -1649,13 +1649,26 @@ function getActiveSetMembers(roomData) {
 function getActiveMembersInOtherSets(){return getActiveSetMembers(data);}
 
 let newSetParticipantDefaults=null;
+function markNewSetParticipantsEdited(){if(newSetParticipantDefaults)newSetParticipantDefaults.edited=true;}
+$("solo-containers").addEventListener("change",markNewSetParticipantsEdited);
+$("team-containers").addEventListener("change",markNewSetParticipantsEdited);
+$("team-containers").addEventListener("click",event=>{if(event.target.closest("button"))markNewSetParticipantsEdited();});
 function prepareNewSetParticipants(){
   const last=data?.sets?.[data.sets.length-1];
   if(!last){newSetParticipantDefaults=null;return;}
   const key=JSON.stringify([room,last.id,last.sides,summarize(last).over]);
   if(newSetParticipantDefaults?.key===key)return;
   const names=last.sides.flatMap(side=>isTeamSet(last.type)?side.players:[side.name]);
-  newSetParticipantDefaults={key,selected:new Set(names)};
+  const previous=newSetParticipantDefaults;
+  if(previous?.sourceIdentity===JSON.stringify([room,last.id])){
+    const boxes=[...document.querySelectorAll("#solo-containers .solo-item input[type=checkbox]")];
+    const changed=previous.edited||boxes.some(box=>box.checked!==previous.selected.has(box.value))||JSON.stringify([...previous.selected].sort())!==JSON.stringify([...previous.initialNames].sort());
+    if(changed){
+      boxes.forEach(box=>{if(box.checked)previous.selected.add(box.value);else previous.selected.delete(box.value);});
+      previous.edited=true;previous.key=key;sig="";return;
+    }
+  }
+  newSetParticipantDefaults={key,sourceIdentity:JSON.stringify([room,last.id]),initialNames:[...names],selected:new Set(names),edited:false};
   $("solo-containers").innerHTML="";$("team-containers").innerHTML="";
   // 前セットに含まれない人を、古い作成画面の割り当てから除く。
   for(const assignments of Object.values(teamAssignments))for(const name of Object.keys(assignments))if(!newSetParticipantDefaults.selected.has(name))delete assignments[name];
@@ -2092,7 +2105,7 @@ function applyRoomSnapshot(snapshot,code,generation){
 
 }
 function scheduleScoreRefresh(){
-  if(!pendingScoreInput||scoreRefreshTimer||scoreRefreshBusy||(pendingScoreInput.refreshAttempts||0)>=3)return;
+  if(!pendingScoreInput||pendingScoreInput.code!==room||pendingScoreInput.generation!==roomSubscriptionGeneration||scoreRefreshTimer||scoreRefreshBusy||(pendingScoreInput.refreshAttempts||0)>=3)return;
   scoreRefreshTimer=setTimeout(()=>{scoreRefreshTimer=null;refreshPendingScore();},1200);
 }
 async function refreshPendingScore(){
@@ -2110,13 +2123,15 @@ async function refreshPendingScore(){
     return false;
   }finally{
     scoreRefreshBusy=false;
-    if(pendingScoreInput===pending){updateScoreSaveUI();scheduleScoreRefresh();}
+    updateScoreSaveUI();scheduleScoreRefresh();
   }
 }
 
 function reconnectRoom(){
   if(!room||scoreInputBusy||scoreCorrectionBusy)return false;
   const code=room,generation=++roomSubscriptionGeneration;
+  if(scoreRefreshTimer){clearTimeout(scoreRefreshTimer);scoreRefreshTimer=null;}
+  if(pendingScoreInput?.code===code)pendingScoreInput={...pendingScoreInput,generation,refreshAttempts:0};
   if(unsub){unsub();unsub=null;}
   roomSyncBlocked=true;roomSyncError="";renderRoomSyncStatus();
   const failed=error=>{
@@ -2130,7 +2145,7 @@ function reconnectRoom(){
       applyRoomSnapshot(snapshot,code,generation);
     },failed);
   }catch(error){failed(error);return false;}
-  return true;
+  scheduleScoreRefresh();return true;
 }
 $("reconnect-room").onclick=()=>{const result=reconnectRoom();if(result)retryHistoryWatch();return result;};
 
@@ -3468,6 +3483,7 @@ async function deleteUnstartedSet(id){
       const target=d.sets.find(item=>item.id===id);
       if(!canDeleteSet(target)||setMemberFingerprint(target)!==baseline)throw Error("セットが更新されたか投球が開始されました。最新の内容を確認してください。");
       d.sets=d.sets.filter(item=>item.id!==id);
+      if(d.sharedTimers)d.sharedTimers=Object.fromEntries(Object.entries(d.sharedTimers).filter(([,record])=>String(record.sid)!==String(id)));
     },{deleteUnfinishedArchivedSetId:id});
     if(!saved)return false;
     data.sets=data.sets.filter(item=>item.id!==id);
