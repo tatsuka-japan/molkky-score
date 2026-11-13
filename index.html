@@ -76,7 +76,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.66</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.68</span></h1>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -311,7 +311,7 @@ function unlock() {
 </script>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {getFirestore,doc,setDoc,getDoc,onSnapshot,runTransaction,collection,getDocs,serverTimestamp as firestoreServerTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getFirestore,doc,setDoc,getDoc,getDocFromServer,onSnapshot,runTransaction,collection,getDocs,serverTimestamp as firestoreServerTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 const firebaseConfig={apiKey:"AIzaSyAautN2cGfEco5KvR0iPzgftSgpiqr3pUw", authDomain:"molkky-998f1.firebaseapp.com", projectId:"molkky-998f1", storageBucket:"molkky-998f1.firebasestorage.app", messagingSenderId:"815701794917", appId:"1:815701794917:web:8c4271e83d153f2bb1268c"};
 const db=getFirestore(initializeApp(firebaseConfig));
 // 保存禁止・容量不足ではこのタブ内に退避する。権限の自動付与は行わない。
@@ -532,14 +532,16 @@ function renderRoomSyncStatus(){
 }
 let scoreInputBusy=false;
 let pendingScoreInput=null;
+let scoreRefreshTimer=null,scoreRefreshBusy=false,roomSnapshotVersion=0;
 let scoreSaveMessage="";
 function updateScoreSaveUI(){
   if(pendingScoreInput){
     const pending=pendingScoreInput,set=data?.sets.find(set=>set.id===pending.sid),match=set?.matches[pending.mi];
     if(!match||set.archived||(set.activeMatchIndex||0)!==pending.mi||(match.currentGameIndex||0)!==pending.gi||getGameThrows(match,pending.gi).length>pending.count)pendingScoreInput=null;
   }
+  if(!pendingScoreInput&&scoreRefreshTimer){clearTimeout(scoreRefreshTimer);scoreRefreshTimer=null;}
   const busy=roomSyncBlocked||orderSaveBusy||scoreInputBusy||scoreCorrectionBusy||!!pendingScoreInput;
-  $("sync-notice").textContent=roomSyncBlocked?(roomSyncError||"最新の記録を確認中です。入力は受信後に再開します。"):orderSaveBusy?"順番を保存中…":scoreInputBusy||scoreCorrectionBusy?scoreSaveMessage||"保存中…":pendingScoreInput?"保存済み・画面の更新を待っています…":scoreSaveMessage;
+  $("sync-notice").textContent=roomSyncBlocked?(roomSyncError||"最新の記録を確認中です。入力は受信後に再開します。"):orderSaveBusy?"順番を保存中…":scoreInputBusy||scoreCorrectionBusy?scoreSaveMessage||"保存中…":pendingScoreInput?(pendingScoreInput.refreshAttempts>=3?"保存済みです。表示を更新できないため、再接続してください。":"保存済み・画面の更新を確認しています…"):scoreSaveMessage;
   $("reconnect-room").disabled=!room||scoreInputBusy||scoreCorrectionBusy;
   $("save-order").disabled=busy||!!data?.sets[cur]&&hasSetThrows({matches:[data.sets[cur].matches[data.sets[cur].activeMatchIndex||0]]});
   $("pad").setAttribute("aria-busy",String(busy));
@@ -2074,6 +2076,44 @@ function enter(code){
   $("home").classList.add("hide");$("game").classList.remove("hide");$("rc").textContent=code;
   reconnectRoom();
 }
+function applyRoomSnapshot(snapshot,code,generation){
+      if(generation!==roomSubscriptionGeneration||room!==code)return;
+      const d=snapshot.exists()?snapshot.data():null;
+      if(!d||!Array.isArray(d.sets)){
+        roomSyncBlocked=true;roomSyncError="部屋の記録を取得できません。部屋コードと通信状態を確認してください。";renderRoomSyncStatus();return;
+      }
+      recoverSkippedActiveMatch(d);
+      if(!snapshot.metadata?.fromCache&&!snapshot.metadata?.hasPendingWrites){roomSyncBlocked=false;roomSyncError="";}
+      if(firstSnap){rememberHomeUsage(d.players);firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";queueMicrotask(()=>activatePlayer());}
+      else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderHidden=false;}
+      if(cur>=d.sets.length)cur=d.sets.length-1;
+      if(cur<0&&view==="set")view="new";
+      prevLen=d.sets.length;data=d;roomSnapshotVersion++;render();renderRoomSyncStatus();
+
+}
+function scheduleScoreRefresh(){
+  if(!pendingScoreInput||scoreRefreshTimer||scoreRefreshBusy||(pendingScoreInput.refreshAttempts||0)>=3)return;
+  scoreRefreshTimer=setTimeout(()=>{scoreRefreshTimer=null;refreshPendingScore();},1200);
+}
+async function refreshPendingScore(){
+  const pending=pendingScoreInput;
+  if(!pending||scoreRefreshBusy||pending.code!==room||pending.generation!==roomSubscriptionGeneration)return false;
+  scoreRefreshBusy=true;pending.refreshAttempts=(pending.refreshAttempts||0)+1;
+  const version=roomSnapshotVersion;
+  try{
+    const snapshot=await getDocFromServer(doc(db,"rooms",pending.code));
+    if(pendingScoreInput!==pending||room!==pending.code||roomSubscriptionGeneration!==pending.generation)return false;
+    if(roomSnapshotVersion!==version)return false;
+    applyRoomSnapshot(snapshot,pending.code,pending.generation);return !pendingScoreInput;
+  }catch(error){
+    if(pendingScoreInput===pending)scoreSaveMessage="保存済みですが表示を再取得できません。通信状態を確認し、再接続してください。";
+    return false;
+  }finally{
+    scoreRefreshBusy=false;
+    if(pendingScoreInput===pending){updateScoreSaveUI();scheduleScoreRefresh();}
+  }
+}
+
 function reconnectRoom(){
   if(!room||scoreInputBusy||scoreCorrectionBusy)return false;
   const code=room,generation=++roomSubscriptionGeneration;
@@ -2087,18 +2127,7 @@ function reconnectRoom(){
   };
   try{
     unsub=onSnapshot(doc(db,"rooms",code),{includeMetadataChanges:true},snapshot=>{
-      if(generation!==roomSubscriptionGeneration||room!==code)return;
-      const d=snapshot.exists()?snapshot.data():null;
-      if(!d||!Array.isArray(d.sets)){
-        roomSyncBlocked=true;roomSyncError="部屋の記録を取得できません。部屋コードと通信状態を確認してください。";renderRoomSyncStatus();return;
-      }
-      recoverSkippedActiveMatch(d);
-      if(!snapshot.metadata?.fromCache&&!snapshot.metadata?.hasPendingWrites){roomSyncBlocked=false;roomSyncError="";}
-      if(firstSnap){rememberHomeUsage(d.players);firstSnap=false;cur=d.sets.length-1;view=d.sets.length?"set":"new";queueMicrotask(()=>activatePlayer());}
-      else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderHidden=false;}
-      if(cur>=d.sets.length)cur=d.sets.length-1;
-      if(cur<0&&view==="set")view="new";
-      prevLen=d.sets.length;data=d;render();renderRoomSyncStatus();
+      applyRoomSnapshot(snapshot,code,generation);
     },failed);
   }catch(error){failed(error);return false;}
   return true;
@@ -2457,10 +2486,10 @@ async function add(pts){
   });
   if(staleInput){scoreSaveMessage="記録が更新されたため入力を保存しませんでした。最新の得点を確認してください。";return false;}
   if(!saved)throw Error("入力を保存できませんでした。利用権限・通信状態・保存容量を確認してください。");
-  pendingScoreInput={sid,mi:activeIdx,gi:gIdx,count:expectedThrowCount};
+  pendingScoreInput={sid,mi:activeIdx,gi:gIdx,count:expectedThrowCount,code:room,generation:roomSubscriptionGeneration};
   scoreSaveMessage="保存しました";return true;
   }catch(error){scoreSaveMessage=`保存できませんでした：${error.message||"通信状態を確認してください。"} 得点を確認してから再入力してください。`;return false;}
-  finally{clearTimeout(slowTimer);scoreInputBusy=false;updateScoreSaveUI();}
+  finally{clearTimeout(slowTimer);scoreInputBusy=false;updateScoreSaveUI();scheduleScoreRefresh();}
 }
 
 $("pad").innerHTML=[...Array(13).keys()].map(i=>`<button data-p="${i}">${i}</button>`).join("");
@@ -3256,13 +3285,14 @@ function renderSoloBlockConfig(set){
   if(set.type !== "solo" && set.type !== "league") { card.classList.add("hide"); return; }
   card.classList.remove("hide");
   const state=blockEditorState(set);
+  const started = hasSetThrows(set);
+  if(started&&!state.scoreAutoCollapsed){state.scoreAutoCollapsed=true;state.hidden=true;saveBlockHidden(set,state);}
   isBlockConfigHidden=state.hidden;
   $("block-config-content").style.display = isBlockConfigHidden ? "none" : "block";
   $("toggle-block-config").textContent = isBlockConfigHidden ? "展開する" : "折りたたむ";
   $("block-config-title").textContent = isLeagueSet(set.type) ? "リーグ戦のブロック設定" : "個人フリーのブロック設定";
   const maxBlocks=isLeagueSet(set.type)?3:Math.max(1,Math.floor(set.sides.length/2));
   $("block-config-desc").textContent = isLeagueSet(set.type) ? "参加者を1～3ブロックに分け、各ブロック内で総当たり対戦を行います。試合開始前に設定してください。各ブロックに2人以上必要です。" : `参加者を1～${maxBlocks}ブロックに分けます。同じブロックの全員が一斉に対戦します。各ブロックに2人以上割り当てます。試合開始前に設定してください。`;
-  const started = hasSetThrows(set);
   const renderKey=JSON.stringify([blockConfigFingerprint(set),state.draft,state.busy]);
   if(renderedBlockEditorId===`${room}:${set.id}`&&state.renderKey===renderKey){$("solo-block-status").textContent=state.message||(started?"スコア入力後はブロックを変更できません。":"未設定の参加者は均等に振り分けられます。");return;}
   renderedBlockEditorId=`${room}:${set.id}`;
