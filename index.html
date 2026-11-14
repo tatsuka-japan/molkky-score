@@ -76,7 +76,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.69</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.77</span></h1>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -124,9 +124,9 @@ td.l,th.l{text-align:left}
 <label>種類 <select id="ntype">
 <option value="team">団体戦（チーム対抗）</option>
 <option value="team_league">団体戦（リーグ）</option>
-<option value="team_tournament">団体戦（トーナメント / 3～8チーム）</option>
+<option value="team_tournament">団体戦（トーナメント / 3～16チーム）</option>
 <option value="solo">個人戦（フリー）</option>
-<option value="tournament">個人戦（トーナメント / 3～8人・負けても2試合以上）</option>
+<option value="tournament">個人戦（トーナメント / 3～16人）</option>
 <option value="league">個人戦（総当たりリーグ）</option>
 </select></label>
 <div id="n-team">
@@ -139,6 +139,14 @@ td.l,th.l{text-align:left}
 <option value="6">6チーム</option>
 <option value="7">7チーム</option>
 <option value="8">8チーム</option>
+<option value="9">9チーム</option>
+<option value="10">10チーム</option>
+<option value="11">11チーム</option>
+<option value="12">12チーム</option>
+<option value="13">13チーム</option>
+<option value="14">14チーム</option>
+<option value="15">15チーム</option>
+<option value="16">16チーム</option>
 </select>
 </label>
 <button type="button" class="sub" id="random-team-assign" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにチーム分け</button>
@@ -169,6 +177,8 @@ td.l,th.l{text-align:left}
 <label>対戦カード内の複数ゲームの先攻 <select id="league-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームの得点が低い順</option><option value="same">いつも同じサイド</option></select></label>
 </div>
 <div id="tournament-setting-box" class="hide" style="background:#eef4fb; padding:8px; border-radius:8px; margin:8px 0;">
+<p class="pl">参加者の並びをシード順として4枠・8枠・16枠に配置し、空き枠は不戦勝にします。不戦勝はゲーム数に含めません。7人・チームは初戦敗者3サイドの交流戦（1ゲーム50点勝負に固定）、8人・チームは交流戦の勝者が同率5位・敗者が同率7位です。3サイド交流戦の下位同点は同率6位とします。</p>
+<label>敗者交流戦 <select id="ntournament-consolation"><option value="yes" selected>あり（標準）</option><option value="none">なし</option></select></label><p class="pl">3位決定戦は実施します（3人では不要）。交流戦なしでは全員2試合以上の保証はなく、下位は同率順位になる場合があります。4人では交流戦の有無で構成は変わりません。9～16人・チームは交流戦なし・3位決定戦ありに固定します。</p>
 <label>トーナメントの対戦ルール <select id="ntournament-mode">
 <option value="game1">① 1本勝負（1ゲーム先取で勝ち抜け）</option>
 <option value="game2_wins">② 2本先取（最大3ゲーム、2勝で勝ち抜け）</option>
@@ -532,7 +542,7 @@ function renderRoomSyncStatus(){
 }
 let scoreInputBusy=false;
 let pendingScoreInput=null;
-let scoreRefreshTimer=null,scoreRefreshBusy=false,roomSnapshotVersion=0;
+let scoreRefreshTimer=null,scoreRefreshBusy=false,roomSnapshotVersion=0,scoreRefreshRequestId=0,scoreRefreshCancel=null;
 let scoreSaveMessage="";
 function updateScoreSaveUI(){
   if(pendingScoreInput){
@@ -910,8 +920,15 @@ function syncGameFirstRuleVisibility(){
   $("league-game-first-box").classList.toggle("hide",!leagueNeedsGames);
 }
 
+let newSetOrderKind="ordinary";
+const newSetOrderChoices={ordinary:"order",tournament:"shuffle"};
 $("ntype").onchange=()=>{
   const type=$("ntype").value;
+  const orderKind=isTournamentSet(type)?"tournament":"ordinary";
+  if(orderKind!==newSetOrderKind){
+    if(["order","custom","shuffle","reverse"].includes($("nfirstgame").value))newSetOrderChoices[newSetOrderKind]=$("nfirstgame").value;
+    $("nfirstgame").value=newSetOrderChoices[orderKind];newSetOrderKind=orderKind;
+  }
   tournamentModeManuallySet = false;
   $("n-team").classList.toggle("hide", !isTeamSet(type));
   $("n-solo").classList.toggle("hide", isTeamSet(type));
@@ -925,6 +942,7 @@ $("ntype").onchange=()=>{
   $("nglabel").textContent = isLeagueSet(type)||isTournamentSet(type)?"ゲーム数":$("nmode").value === "first"?"何勝先取？":"ゲーム数";
   syncTournamentModeFromGeneralSettings();
   syncGameFirstRuleVisibility();
+  syncNewTournamentExchange();
 };
 $("ngames").addEventListener("change",()=>{syncTournamentModeFromGeneralSettings();syncGameFirstRuleVisibility();});
 $("ntournament-mode").onchange=()=>{ tournamentModeManuallySet = true;syncGameFirstRuleVisibility(); };
@@ -1064,6 +1082,16 @@ function getMatchWinner(m, missRule, overRule, isTeam=false) {
 
   if (mode === "match_total" || mode === "match2_total") {
     const gamesToPlay = mode === "match2_total" ? 2 : Math.max(1, parseInt(m.gamesToPlay, 10) || 2);
+    if(customSides.length>2){
+      const totals=customSides.map(()=>0),last=Math.max(gamesToPlay-1,...recordedGameIndices(m));
+      for(let index=0;index<=last;index++){
+        const result=replay(customSides,getGameThrows(m,index),getGameStart(m,index),isTeam,missRule,overRule,getGameSideOrder(m,index));
+        if(result.winner===null)return null;
+        result.st.forEach((side,i)=>totals[i]+=side.score);
+        if(index>=gamesToPlay-1){const max=Math.max(...totals),leaders=totals.map((v,i)=>v===max?i:-1).filter(i=>i>=0);if(leaders.length===1)return leaders[0];}
+      }
+      return null;
+    }
     const totals = customSides.map(() => 0);
     for(let gameIndex = 0; gameIndex < gamesToPlay; gameIndex++) {
       const game = getGameThrows(m, gameIndex);
@@ -1078,7 +1106,8 @@ function getMatchWinner(m, missRule, overRule, isTeam=false) {
     return tieBreak.winner;
   } else if (mode === "game2_wins") {
     const wins = customSides.map(() => 0);
-    [g1, g2, g3].forEach((game,gameIndex) => {
+    recordedGameIndices(m).forEach(gameIndex => {
+      const game=getGameThrows(m,gameIndex);
       const result = replay(customSides, game, getGameStart(m,gameIndex), isTeam, missRule, overRule,getGameSideOrder(m,gameIndex));
       if(result.winner !== null) wins[result.winner]++;
     });
@@ -1109,7 +1138,7 @@ function getMatchCardsHTML(match,set){
   const card=index=>getGameSideOrder(match,index).map(slot=>sides[slot]?sideLabel(set,sides[slot]):esc(isTournamentSet(set.type)?getTournamentSlotLabel(set,match,slot):"未定")).join(" vs ");
   const parts=[];
   const multi=match.tournamentMode&&match.tournamentMode!=="game1";
-  for(let index=0;index<Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1);index++){
+  for(let index=0;index<Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1,...recordedGameIndices(match).map(index=>index+1));index++){
     if(!getGameThrows(match,index).length)continue;
     parts.push(`${multi?`第${index+1}ゲーム: `:""}${card(index)}`);
   }
@@ -1120,7 +1149,7 @@ function getMatchScoreHTML(match, set) {
   if(match.skipped)return "-";
   const sides = match.customSides || match.sides;
   const parts = [];
-  for(let gameIndex = 0; gameIndex < Math.max(3, (parseInt(match.gamesToPlay, 10) || 1) + 1); gameIndex++) {
+  for(let gameIndex = 0; gameIndex < Math.max(3, (parseInt(match.gamesToPlay, 10) || 1) + 1,...recordedGameIndices(match).map(index=>index+1)); gameIndex++) {
     const throws = getGameThrows(match, gameIndex);
     if(throws.length === 0) continue;
     const result = replay(sides, throws, getGameStart(match,gameIndex), isTeamSet(set.type), set.missRule, set.overRule,getGameSideOrder(match,gameIndex));
@@ -1138,7 +1167,7 @@ function getMatchStartsHTML(match,set){
   };
   const parts=[];
   const multi=match.tournamentMode&&match.tournamentMode!=="game1";
-  for(let index=0;index<Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1);index++){
+  for(let index=0;index<Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1,...recordedGameIndices(match).map(index=>index+1));index++){
     if(!getGameThrows(match,index).length)continue;
     parts.push(`${multi?`第${index+1}ゲーム: `:""}${label(index)}`);
   }
@@ -1159,7 +1188,7 @@ function recoverSkippedActiveMatch(roomData){
 
 function resultGameSchedule(match,set){
   const mode=match.tournamentMode||"game1";
-  const planned=mode==="game2_wins"?3:mode==="match2_total"?2:mode==="match_total"?Math.max(1,parseInt(match.gamesToPlay,10)||2):1;
+  const planned=mode==="game2_wins"?(match.customSides||match.sides).length+1:mode==="match2_total"?2:mode==="match_total"?Math.max(1,parseInt(match.gamesToPlay,10)||2):1;
   const index=set.matches.indexOf(match);
   const changes=(set.gameCountChanges||[]).flatMap(change=>change.matches||[]).filter(change=>change.index===index&&change.fromMode);
   const prior=changes.reduce((max,change)=>Math.max(max,change.fromMode==="game2_wins"?3:change.from),planned);
@@ -1170,7 +1199,7 @@ function resultGameSchedule(match,set){
   const ordinaryAdded=(set.gameCountChanges||[]).some(change=>(change.matches||[]).some(item=>item.index===index&&item.from===0&&item.to===1));
   return Array.from({length:count},(_,gameIndex)=>{
     const entered=getGameThrows(match,gameIndex).length>0;
-    const extension=(mode==="match_total"||mode==="match2_total")&&gameIndex===planned&&(match.currentGameIndex||0)===planned&&!match.skipped;
+    const extension=(mode==="match_total"||mode==="match2_total")&&gameIndex>=planned&&(entered||(match.currentGameIndex||0)===gameIndex)&&!match.skipped;
     const skipped=!!match.skipped||(!entered&&!extension&&(gameIndex>=planned||mode==="game2_wins"&&winner!==null));
     const added=!skipped&&(ordinaryAdded||!!latest&&latest.to>latest.from&&gameIndex>=latest.from&&gameIndex<planned);
     return {index:gameIndex,skipped,added,extension};
@@ -1283,7 +1312,7 @@ function isMyTurn(){
   return currentSide && currentSide.players.includes(me);
 }
 
-const teamNamesDefault = ["赤チーム", "白チーム", "青チーム", "黄チーム", "緑チーム", "紫チーム", "橙チーム", "桃チーム"];
+const teamNamesDefault = ["赤チーム", "白チーム", "青チーム", "黄チーム", "緑チーム", "紫チーム", "橙チーム", "桃チーム",...Array.from({length:8},(_,i)=>`チーム${i+9}`)];
 let teamAssignments = Object.create(null);
 let teamOrder = {};
 
@@ -1295,7 +1324,7 @@ function getSetTotalScores(set) {
   const totals = new Map(set.sides.map(side => [scoreSideKey(side, set.type), 0]));
   set.matches.filter(match => !match.totalTiebreak&&!match.skipped).forEach(match => {
     const sides = match.customSides || match.sides;
-    const gameCount = Math.max(3, (parseInt(match.gamesToPlay, 10) || 1) + 1);
+    const gameCount = Math.max(3, (parseInt(match.gamesToPlay, 10) || 1) + 1,...recordedGameIndices(match).map(index=>index+1));
     for(let gameIndex = 0; gameIndex < gameCount; gameIndex++) {
       const throws = getGameThrows(match, gameIndex);
       if(throws.length === 0) continue;
@@ -1324,7 +1353,7 @@ function getLeagueStandings(set){
         rows.get(sides[winner].name).wins++;
         const loser=sides[1-winner]; if(loser&&rows.has(loser.name)) directResults.push([sides[winner].name,loser.name]);
       }
-      const limit=Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1);
+      const limit=Math.max(3,(parseInt(match.gamesToPlay,10)||1)+1,...recordedGameIndices(match).map(index=>index+1));
       for(let gameIndex=0;gameIndex<limit;gameIndex++){
         const throws=getGameThrows(match,gameIndex); if(!throws.length)continue;
         const result=replay(sides,throws,getGameStart(match,gameIndex),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,gameIndex));
@@ -1374,6 +1403,11 @@ function compareLeagueRowsAcrossBlocks(a,b,useRates=false){
 
 function resolvePlayoffStart(set,sides){
   if(set.playoffFirstRule==="random")return Math.floor(Math.random()*Math.max(1,sides.length));
+  if(set.playoffFirstRule==="seed"){
+    const rank=side=>{const value=Number((set.playoffRanks||{})[side?.name]);return Number.isFinite(value)&&value>0?value:Infinity;};
+    let index=0;for(let i=1;i<sides.length;i++)if(rank(sides[i])<rank(sides[index]))index=i;
+    return index;
+  }
   if(set.playoffFirstRule==="lower") {
     const ranks=set.playoffRanks||{};
     let index=0;
@@ -1383,14 +1417,15 @@ function resolvePlayoffStart(set,sides){
   return 0;
 }
 
-function getLeaguePlayoffOrder(set,qualifierCount,drawMode="cross"){
+function defaultLeagueDrawMode(set){return getLeagueStandings(set).length>=2?"cross":"ranked";}
+function getLeaguePlayoffOrder(set,qualifierCount,drawMode=defaultLeagueDrawMode(set)){
   const standings=getLeagueStandings(set);
   const useRates=standings.length>=3;
   const compare=(a,b)=>compareLeagueRowsAcrossBlocks(a,b,useRates);
   const blocks=standings.map((block,blockIndex)=>({name:block.name,blockIndex,rows:block.standings.map(row=>({...row,blockName:block.name,blockIndex})).sort((a,b)=>a.rank-b.rank||compare(a,b))}));
   const total=blocks.reduce((sum,block)=>sum+block.rows.length,0);
   const target=Math.min(qualifierCount,total);
-  if(target<3||target>8)return null;
+  if(!Number.isInteger(target)||target<3||target>16)return null;
   let selected=[];
   if(blocks.length===1) {
     selected=blocks[0].rows.slice(0,target);
@@ -1407,6 +1442,22 @@ function getLeaguePlayoffOrder(set,qualifierCount,drawMode="cross"){
   }
   selected=selected.slice(0,target);
   if(selected.length!==target)return null;
+
+  if(target>8){
+    const ranked=drawMode==="random"?shuffleArray([...selected]):[...selected].sort(compare);
+    if(drawMode==="cross"){
+      const positions=powerSeedPositions(16),slots=positions.map(seed=>ranked[seed-1]||null),protectedCount=Math.max(16-target,4);
+      for(let i=0;i<16;i+=2){
+        if(!slots[i]||!slots[i+1]||slots[i].blockName!==slots[i+1].blockName)continue;
+        for(let j=0;j<16;j+=2){
+          if(j===i||positions[i+1]<=protectedCount||positions[j+1]<=protectedCount||!slots[j]||!slots[j+1])continue;
+          if(slots[i].blockName!==slots[j+1].blockName&&slots[j].blockName!==slots[i+1].blockName){[slots[i+1],slots[j+1]]=[slots[j+1],slots[i+1]];break;}
+        }
+      }
+      positions.forEach((seed,index)=>{if(seed<=target)ranked[seed-1]=slots[index];});
+    }
+    return ranked.map(row=>set.sides.find(side=>side.name===row.name));
+  }
 
   if(target===3) {
     if(drawMode==="random")return shuffleArray([...selected]).map(row=>set.sides.find(side=>side.name===row.name));
@@ -1427,7 +1478,7 @@ function getLeaguePlayoffOrder(set,qualifierCount,drawMode="cross"){
   }
   if(drawMode==="ranked") {
     const ranked=[...selected].sort(compare);
-    const maps={4:[0,3,1,2],5:[3,4,0,1,2],6:[2,5,3,4,0,1],7:[1,6,2,5,3,4,0],8:[0,7,3,4,1,6,2,5]};
+    const maps={4:[0,3,1,2],5:[3,4,0,1,2],6:[3,4,2,5,0,1],7:[3,4,1,6,2,5,0],8:[0,7,3,4,1,6,2,5]};
     return (maps[target]||ranked.map((_,i)=>i)).map(index=>set.sides.find(side=>side.name===ranked[index]?.name));
   }
   if(drawMode==="cross"&&blocks.length===2&&target===4&&blocks[0].rows.length>=2&&blocks[1].rows.length>=2) {
@@ -1440,7 +1491,7 @@ function getLeaguePlayoffOrder(set,qualifierCount,drawMode="cross"){
   }
 
   const ranked=[...selected].sort(compare);
-  const byeCount=target===5||target===7?1:target===6?2:0;
+  const byeCount=2**Math.ceil(Math.log2(target))-target;
   const byes=ranked.splice(0,byeCount);
   const pairs=[];
   while(ranked.length>=2) {
@@ -1458,20 +1509,36 @@ function getLeaguePlayoffOrder(set,qualifierCount,drawMode="cross"){
   return ordered.map(row=>set.sides.find(side=>side.name===row.name));
 }
 
+const leagueConsolationChoices=new Map(),leagueQualifierChoices=new Map(),leagueDrawChoices=new Map();
+$("v-set").addEventListener("change",event=>{
+  if(event.target.id!=="league-playoff-draw"||!data?.sets[cur])return;
+  leagueDrawChoices.set(JSON.stringify([room,data.sets[cur].id]),event.target.value);
+});
+$("v-set").addEventListener("change",event=>{
+  if(event.target.id!=="league-playoff-count"||!data?.sets[cur])return;
+  leagueQualifierChoices.set(JSON.stringify([room,data.sets[cur].id]),event.target.value);syncLeagueTournamentExchange();
+});
+function rememberLeagueConsolationChoice(event){
+  if(event.target.id!=="league-playoff-consolation"||!data?.sets[cur])return;
+  leagueConsolationChoices.set(JSON.stringify([room,data.sets[cur].id]),event.target.value);
+}
+$("v-set").addEventListener("change",rememberLeagueConsolationChoice);
 function renderLeaguePlayoffPanel(set){
   const existing=data.sets.find(item=>item.sourceLeagueSetId===set.id);
   if(existing)return `<div class="card" style="border:1px solid #2a9d3a;"><b>決勝トーナメント作成済み</b><p class="pl">${esc(existing.name)}として作成されています。</p><button type="button" id="open-league-playoff">決勝トーナメントを開く</button></div>`;
   const total=set.sides.length;
   if(total<3)return `<div class="card"><b>決勝トーナメント</b><p class="pl">進出人数が3人・チーム以上になった場合に作成できます。</p></div>`;
+  const countChoice=leagueQualifierChoices.get(JSON.stringify([room,set.id]))||(total<=16?"all":"16");
   const options=[];
-  if(total>=3)options.push(`<option value="3" ${total===3?"selected":""}>上位3人・チーム</option>`);
-  if(total>=4)options.push(`<option value="4" selected>上位4人・チーム</option>`);
-  if(total>=8)options.push(`<option value="8">上位8人・チーム</option>`);
-  if(total<=8&&total!==3)options.push(`<option value="all">全員（${total}人・チーム）</option>`);
+  for(let count=3;count<=Math.min(total,16);count++)options.push(`<option value="${count}" ${String(count)===countChoice?"selected":""}>上位${count}人・チーム</option>`);
+  if(total<=16)options.push(`<option value="all" ${countChoice==="all"?"selected":""}>全員（${total}人・チーム）</option>`);
   const mode="match_total";
+  const exchangeChoice=leagueConsolationChoices.get(JSON.stringify([room,set.id]))||"yes";
+  const drawChoice=leagueDrawChoices.get(JSON.stringify([room,set.id]))||defaultLeagueDrawMode(set);
   return `<div class="card" style="border:1px solid #2a9d3a;">
     <b>🏆 決勝トーナメントを作成</b>
     <p class="pl">リーグ順位を使って別セットを作成します。トーナメントのゲーム数・判定ルールはリーグと別に設定できます。</p>
+    <label>敗者交流戦 <select id="league-playoff-consolation"><option value="yes" ${exchangeChoice==="yes"?"selected":""}>あり（標準）</option><option value="none" ${exchangeChoice==="none"?"selected":""}>なし</option></select></label><p class="pl">3位決定戦は残します。9～16人・チームは交流戦なしに固定し、敗退ラウンドごとの同率順位を表示します。</p>
     <label>進出人数 <select id="league-playoff-count">${options.join("")}</select></label>
     <label>トーナメントの判定方式 <select id="league-playoff-mode">
       <option value="game1" ${mode==="game1"?"selected":""}>1本勝負</option>
@@ -1482,7 +1549,7 @@ function renderLeaguePlayoffPanel(set){
     <div id="league-playoff-game-first-box"><label>対戦カード内の複数ゲームの先攻 <select id="league-playoff-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームの得点が低い順</option><option value="same">いつも同じサイド</option></select></label></div>
     <label>0点3回連続 <select id="league-playoff-miss"><option value="out" ${set.missRule==="out"?"selected":""}>失格・負け</option><option value="skip" ${set.missRule==="skip"?"selected":""}>1回休み</option></select></label>
     <label>50点超過 <select id="league-playoff-over"><option value="25" ${set.overRule==="25"?"selected":""}>25点に戻る</option><option value="0" ${set.overRule==="0"?"selected":""}>0点に戻る</option><option value="minus" ${set.overRule==="minus"?"selected":""}>超過分を引く</option></select></label>
-    <label>組合せ方法 <select id="league-playoff-draw"><option value="cross">ブロック間対戦を優先</option><option value="ranked">順位順シード</option><option value="random">ランダム抽選</option></select></label>
+    <label>組合せ方法 <select id="league-playoff-draw"><option value="cross" ${drawChoice==="cross"?"selected":""}>ブロック間対戦を優先</option><option value="ranked" ${drawChoice==="ranked"?"selected":""}>順位順シード</option><option value="random" ${drawChoice==="random"?"selected":""}>ランダム抽選</option></select></label>
     <label>初戦の先攻 <select id="league-playoff-first"><option value="seed">順位上位を先攻</option><option value="lower">順位下位を先攻</option><option value="random">ランダム</option><option value="manual">手動（じゃんけん後に順番保存）</option></select></label>
     <p class="pl">「ブロック間対戦を優先」は、同じブロックの対戦を避ける配置です。「順位順シード」は順位上位同士が早い段階で当たりにくい配置、「ランダム抽選」は進出者の組合せを毎回抽選します。3ブロック以上では、進出者を勝率、1試合あたり得失点差、1試合あたり総得点で比較します。</p>
     <button type="button" id="create-league-playoff">決勝トーナメントを作成</button>
@@ -1495,9 +1562,9 @@ async function createLeaguePlayoff(leagueId){
   if(data.sets.some(item=>item.sourceLeagueSetId===league.id)){alert("このリーグからの決勝トーナメントは作成済みです。");return;}
   const button=$("create-league-playoff");
   if(button){button.disabled=true;button.textContent="作成中…";}
-  const rawCount=$("league-playoff-count").value;
+  const rawCount=$("league-playoff-count").value||(league.sides.length<=16?"all":"16");
   const count=rawCount==="all"?league.sides.length:parseInt(rawCount,10);
-  const drawMode=$("league-playoff-draw").value||"cross";
+  const drawMode=$("league-playoff-draw").value||defaultLeagueDrawMode(league);
   const sides=getLeaguePlayoffOrder(league,count,drawMode);
   if(!sides||sides.some(side=>!side)){if(button){button.disabled=false;button.textContent="決勝トーナメントを作成";}alert("選択した人数の組み合わせを作成できません。進出人数を確認してください。");return;}
   const games=Math.max(1,Math.min(99,parseInt($("league-playoff-games").value,10)||1));
@@ -1506,10 +1573,108 @@ async function createLeaguePlayoff(leagueId){
   const blocks=getLeagueStandings(league);
   const playoffRows=blocks.flatMap((block,blockIndex)=>block.standings.map(row=>({...row,blockIndex}))).sort((a,b)=>compareLeagueRowsAcrossBlocks(a,b,blocks.length>=3));
   const playoffRanks=Object.fromEntries(playoffRows.map((row,index)=>[row.name,index+1]));
-  const created=await createSet({type:teamMode?"team_tournament":"tournament",sides,mode:"fixed",games,missRule:$("league-playoff-miss").value||league.missRule||"out",overRule:$("league-playoff-over").value||league.overRule||"25",firstRule:"rotate",gameFirstRule:$("league-playoff-game-first").value||"rotate",tournamentMode,playoffFirstRule:$("league-playoff-first").value||"seed",playoffRanks,playoffDrawMode:drawMode,fixedBracketOrder:true,sourceLeagueSetId:league.id,sourceLeagueName:league.name||"リーグ戦",name:`決勝トーナメント（${league.name||"リーグ戦"}）`});
+  const created=await createSet({type:teamMode?"team_tournament":"tournament",sides,mode:"fixed",games,missRule:$("league-playoff-miss").value||league.missRule||"out",overRule:$("league-playoff-over").value||league.overRule||"25",firstRule:"rotate",gameFirstRule:$("league-playoff-game-first").value||"rotate",tournamentMode,consolationEnabled:$("league-playoff-consolation").value!=="none",playoffFirstRule:$("league-playoff-first").value||"seed",playoffRanks,playoffDrawMode:drawMode,fixedBracketOrder:true,sourceLeagueSetId:league.id,sourceLeagueName:league.name||"リーグ戦",name:`決勝トーナメント（${league.name||"リーグ戦"}）`});
   if(!created&&button){button.disabled=false;button.textContent="決勝トーナメントを作成";}
 }
 
+
+function powerSeedPositions(size){
+  let positions=[1,2];
+  while(positions.length<size){const next=positions.length*2+1;positions=positions.flatMap(seed=>[seed,next-seed]);}
+  return positions;
+}
+function buildLargeTournament(set,orderedSides,tournamentMode){
+  const size=2**Math.ceil(Math.log2(orderedSides.length));
+  const slots=powerSeedPositions(size).map(seed=>orderedSides[seed-1]||null),matches=[],nodeMap={};
+  let nodes=slots.map(side=>({side,source:null})),level=0;
+  while(nodes.length>1){
+    level++;const next=[],round=nodes.length;let ordinal=0;
+    for(let i=0;i<nodes.length;i+=2){
+      const a=nodes[i],b=nodes[i+1],hasA=!!(a.side||a.source),hasB=!!(b.side||b.source);
+      if(!hasA||!hasB){next.push(hasA?a:b);continue;}
+      const bracket=round===2?'final':round===4?`semi${i/2+1}`:`r${round}_${i/2+1}`;
+      const sides=[a.side||null,b.side||null],start=resolvePlayoffStart(set,sides.filter(Boolean));
+      const match={sides,start,gameStarts:[start],gameFirstRule:set.gameFirstRule||'rotate',throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode,bracket,bracketRound:round,roundMatchNumber:++ordinal,nextWin:null,nextLose:null};
+      [a,b].forEach((node,slot)=>{if(node.source)node.source.nextWin={match:bracket,slot};});
+      nodeMap[`${level}:${i/2}`]=bracket;matches.push(match);next.push({side:null,source:match});
+    }
+    nodes=next;
+  }
+  const bronze={sides:[null,null],start:0,gameStarts:[0],gameFirstRule:set.gameFirstRule||'rotate',throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode,bracket:'bronze',nextWin:null,nextLose:null};
+  const semis=matches.filter(match=>match.bracket==='semi1'||match.bracket==='semi2');
+  semis.forEach((match,i)=>match.nextLose={match:'bronze',slot:i});
+  matches.splice(matches.findIndex(match=>match.bracket==='final'),0,bronze);
+  return {matches,bracketSize:size,bracketSlots:slots.map(side=>side?.name||null),bracketNodeMap:nodeMap};
+}
+
+function getNewTournamentLabel(set,match){
+  if(match.bracketRound>4)return `${match.bracketRound===16?"1回戦":"準々決勝"}${(match.roundMatchNumber||Number(match.bracket.split("_")[1]))}`;
+  if(match.bracket==="placement")return "敗者交流戦（順位対象外）";
+  if(match.bracket==="consolation")return "4・5位決定交流戦";
+  if(match.bracket==="loser_round1"&&set.sides.length===7)return match.fixedFiftyPoint?"敗者交流戦（3サイド・1ゲーム50点勝負・5～7位）":"敗者交流戦（3サイド・5～7位）";
+  if(match.bracket.startsWith("loser_round"))return set.sides.length===8?`敗者交流戦${match.bracket.endsWith("1")?"①":"②"}（勝者同率5位・敗者同率7位）`:"5・6位決定交流戦";
+  return {m1:"1回戦①",m2:"1回戦②",m3:"1回戦③",m4:"1回戦④",semi1:"準決勝①",semi2:"準決勝②",bronze:"3位決定戦",final:"決勝"}[match.bracket]||"対戦";
+}
+function getTournamentStandings(set){
+  if(set.sides.length===3)return getThreePlayerTournamentStandings(set);
+  const rows=[],get=key=>set.matches.find(match=>match.bracket===key);
+  const pair=(key,winRank,loseRank)=>{
+    const match=get(key);if(!match)return;
+    const winner=getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type)),sides=match.customSides||match.sides;
+    if(winner===null||sides.length!==2)return;
+    rows.push({rank:winRank,name:sides[winner].name});if(loseRank)rows.push({rank:loseRank,name:sides[1-winner].name});
+  };
+  pair("final",1,2);pair("bronze",3,set.sides.length===5&&set.consolationEnabled!==false?null:4);
+  if(set.bracketSize>8){
+    set.matches.filter(match=>match.bracketRound>4).forEach(match=>{const winner=getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type));if(winner!==null)rows.push({rank:match.bracketRound/2+1,name:(match.customSides||match.sides)[1-winner].name});});
+    return rows.sort((a,b)=>a.rank-b.rank);
+  }
+  if(set.consolationEnabled===false){
+    const ranked=new Set(rows.map(row=>row.name));set.sides.filter(side=>!ranked.has(side.name)).forEach(side=>rows.push({rank:5,name:side.name}));return rows.sort((a,b)=>a.rank-b.rank);
+  }
+  if(set.sides.length===5)pair("consolation",4,5);
+  if(set.sides.length===6)pair("loser_round1",5,6);
+  if(set.sides.length===8){pair("loser_round1",5,7);pair("loser_round2",5,7);}
+  if(set.sides.length===7){
+    const match=get("loser_round1"),sides=match&&(match.customSides||match.sides);
+    if(sides?.length===3){
+      const winner=getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type));
+      if(winner!==null){
+        const metric=sides.map(()=>0);
+        recordedGameIndices(match).forEach(index=>{const result=replay(sides,getGameThrows(match,index),getGameStart(match,index),isTeamSet(set.type),set.missRule,set.overRule,getGameSideOrder(match,index));if(result.winner===null)return;if(match.tournamentMode==="game2_wins")metric[result.winner]++;else result.st.forEach((side,i)=>metric[i]+=side.score);});
+        rows.push({rank:5,name:sides[winner].name});const rest=sides.map((side,i)=>({name:side.name,value:metric[i],index:i})).filter(row=>row.index!==winner).sort((a,b)=>b.value-a.value);
+        rest.forEach((row,i)=>rows.push({rank:i&&row.value!==rest[0].value?7:6,name:row.name}));
+      }
+    }
+  }
+  return rows.sort((a,b)=>a.rank-b.rank);
+}
+function renderPowerTournamentBracket(set){
+  if(!Array.isArray(set.bracketSlots))return "";
+  const slots=set.bracketSlots,size=slots.length,rounds=Math.log2(size),width=210*(rounds+1),height=size*40+40;
+  const text=(x,y,label)=>`<text x="${x}" y="${y}" font-size="13" fill="#20354a"><title>${esc(label)}</title>${esc([...label].slice(0,11).join(""))}</text>`;
+  let svg=Array.from({length:rounds+1},(_,i)=>text(i*210+6,16,i===0?"参加枠":i===rounds?"決勝／優勝":size>=8&&i===1?"1回戦":size===16&&i===2?"準々決勝":"準決勝")).join(""),nodes=slots.map((name,i)=>({name,y:40+i*40})),counter=0;
+  nodes.forEach(node=>svg+=text(6,node.y,node.name||"不戦勝枠"));
+  for(let level=1;level<=rounds;level++){
+    const next=[];
+    for(let i=0;i<nodes.length;i+=2){
+      const first=nodes[i],second=nodes[i+1],y=(first.y+second.y)/2,x=level*210;
+      let match,name;
+      if(level===1&&(!first.name||!second.name))name=first.name||second.name;
+      else{
+        const key=set.bracketNodeMap?.[`${level}:${i/2}`]||(level===rounds?"final":size===8&&level===1?`m${++counter}`:size===4&&set.sides.length===3?"m1":`semi${i/2+1}`);
+        match=set.matches.find(item=>item.bracket===key);
+        const winner=match?getMatchWinner(match,set.missRule,set.overRule,isTeamSet(set.type)):null;
+        name=winner!==null?(match.customSides||match.sides)[winner]?.name:null;
+      }
+      svg+=`<path d="M${x-60},${first.y-4} H${x-28} V${second.y-4} H${x-60} M${x-28},${y-4} H${x-6}" fill="none" stroke="#6c8094" stroke-width="1.5"/>`;
+      svg+=text(x,y,name||(match?getNewTournamentLabel(set,match)+" 勝者未定":"不戦勝"));next.push({name:name||"未定",y});
+    }
+    nodes=next;
+  }
+  const extras=set.matches.filter(match=>["bronze","consolation","placement","loser_round1","loser_round2"].includes(match.bracket));
+  return `<h4>優勝トーナメント（${size}枠・不戦勝${size-set.sides.length}）</h4><div style="overflow-x:auto"><svg role="img" aria-label="優勝トーナメント表" viewBox="0 0 ${width} ${height}" style="display:block;width:${width}px;max-width:none;height:${height}px">${svg}</svg></div>`+extras.map(match=>`<div class="card"><b>${esc(getNewTournamentLabel(set,match))}</b><div>${(match.customSides||match.sides).map((side,slot)=>side?esc(sideDisplayName(set,side)):esc(getTournamentSlotLabel(set,match,slot))).join(" vs ")}</div></div>`).join("");
+}
 
 function getThreePlayerTournamentStandings(set){
   const finalMatch=set.matches.find(match=>match.bracket==="final");
@@ -1672,7 +1837,7 @@ function prepareNewSetParticipants(){
   $("solo-containers").innerHTML="";$("team-containers").innerHTML="";
   // 前セットに含まれない人を、古い作成画面の割り当てから除く。
   for(const assignments of Object.values(teamAssignments))for(const name of Object.keys(assignments))if(!newSetParticipantDefaults.selected.has(name))delete assignments[name];
-  if(isTeamSet(last.type)&&last.sides.length>=2&&last.sides.length<=8){
+  if(isTeamSet(last.type)&&last.sides.length>=2&&last.sides.length<=16){
     const count=last.sides.length,used=new Set();teamAssignments[count]=Object.create(null);
     teamOrder[count]=last.sides.map((side,index)=>{
       let teamIndex=teamNamesDefault.indexOf(side.name);
@@ -1683,6 +1848,28 @@ function prepareNewSetParticipants(){
   }
   sig="";
 }
+function syncExchangeSelection(control,count){
+  if(!control)return;
+  if(count>8){
+    if(!control.dataset.largeOnly)control.dataset.smallChoice=control.value||"yes";
+    control.dataset.largeOnly="1";control.value="none";control.disabled=true;
+  }else{
+    if(control.dataset.largeOnly){control.value=control.dataset.smallChoice||"yes";delete control.dataset.largeOnly;}
+    control.disabled=false;
+  }
+}
+function syncNewTournamentExchange(){
+  const type=$("ntype").value;
+  const count=isTournamentSet(type)?(isTeamSet(type)?getTeamSides():getSoloSides()).length:0;
+  syncExchangeSelection($("ntournament-consolation"),count);
+}
+function syncLeagueTournamentExchange(){
+  const set=data?.sets[cur],raw=$("league-playoff-count").value;
+  syncExchangeSelection($("league-playoff-consolation"),raw==="all"?(set?.sides.length||0):Number(raw));
+}
+$("solo-containers").addEventListener("change",syncNewTournamentExchange);
+$("team-containers").addEventListener("change",syncNewTournamentExchange);
+
 function updateTeamCheckboxes(){
   if(!data) return;
   if(newSetParticipantDefaults){
@@ -1773,6 +1960,7 @@ function updateTeamCheckboxes(){
         `</div>`;
     }).join("") + `</div>`;
   $("solo-containers").innerHTML = soloHtml;
+  syncNewTournamentExchange();
 }
 
 function randomAssign(players,count){
@@ -2108,28 +2296,41 @@ function scheduleScoreRefresh(){
   if(!pendingScoreInput||pendingScoreInput.code!==room||pendingScoreInput.generation!==roomSubscriptionGeneration||scoreRefreshTimer||scoreRefreshBusy||(pendingScoreInput.refreshAttempts||0)>=3)return;
   scoreRefreshTimer=setTimeout(()=>{scoreRefreshTimer=null;refreshPendingScore();},1200);
 }
+function invalidateScoreRefresh(){
+  scoreRefreshRequestId++;
+  const cancel=scoreRefreshCancel;scoreRefreshCancel=null;scoreRefreshBusy=false;
+  if(cancel)cancel();
+}
 async function refreshPendingScore(){
   const pending=pendingScoreInput;
   if(!pending||scoreRefreshBusy||pending.code!==room||pending.generation!==roomSubscriptionGeneration)return false;
+  const requestId=++scoreRefreshRequestId;
   scoreRefreshBusy=true;pending.refreshAttempts=(pending.refreshAttempts||0)+1;
-  const version=roomSnapshotVersion;
+  const version=roomSnapshotVersion;let timeout;
+  const deadline=new Promise((_,reject)=>{
+    timeout=setTimeout(()=>reject(Error("表示の再取得がタイムアウトしました。")),10000);
+    scoreRefreshCancel=()=>reject(Error("再接続のため取得を切り替えました。"));
+  });
   try{
-    const snapshot=await getDocFromServer(doc(db,"rooms",pending.code));
-    if(pendingScoreInput!==pending||room!==pending.code||roomSubscriptionGeneration!==pending.generation)return false;
+    const snapshot=await Promise.race([getDocFromServer(doc(db,"rooms",pending.code)),deadline]);
+    if(requestId!==scoreRefreshRequestId||pendingScoreInput!==pending||room!==pending.code||roomSubscriptionGeneration!==pending.generation)return false;
     if(roomSnapshotVersion!==version)return false;
     applyRoomSnapshot(snapshot,pending.code,pending.generation);return !pendingScoreInput;
   }catch(error){
-    if(pendingScoreInput===pending)scoreSaveMessage="保存済みですが表示を再取得できません。通信状態を確認し、再接続してください。";
+    if(requestId===scoreRefreshRequestId&&pendingScoreInput===pending)scoreSaveMessage="保存済みですが表示を再取得できません。通信状態を確認し、再接続してください。";
     return false;
   }finally{
-    scoreRefreshBusy=false;
-    updateScoreSaveUI();scheduleScoreRefresh();
+    clearTimeout(timeout);
+    if(requestId===scoreRefreshRequestId){
+      scoreRefreshCancel=null;scoreRefreshBusy=false;updateScoreSaveUI();scheduleScoreRefresh();
+    }
   }
 }
 
 function reconnectRoom(){
   if(!room||scoreInputBusy||scoreCorrectionBusy)return false;
   const code=room,generation=++roomSubscriptionGeneration;
+  invalidateScoreRefresh();
   if(scoreRefreshTimer){clearTimeout(scoreRefreshTimer);scoreRefreshTimer=null;}
   if(pendingScoreInput?.code===code)pendingScoreInput={...pendingScoreInput,generation,refreshAttempts:0};
   if(unsub){unsub();unsub=null;}
@@ -2239,8 +2440,8 @@ async function createSet(set, replacement=null){
     const totalGames = (set.type === "team" || set.type === "solo") && set.mode === "first" ? 1 : configuredGames;
     
     if(isTournamentSet(set.type)){
-      if(set.sides.length < 3 || set.sides.length > 8) {
-        alert("トーナメントモードは3～8人で利用できます");
+      if(set.sides.length < 3 || set.sides.length > 16) {
+        alert("トーナメントモードは3～16人で利用できます");
         return false;
       }
       let tournamentSides=[...set.sides];
@@ -2266,6 +2467,16 @@ async function createSet(set, replacement=null){
         });
       }
       const n = tournamentSides.length;
+      if(n<=8){
+      if(!set.sourceLeagueSetId){
+        const map={3:[1,2,0],4:[0,1,2,3],5:[3,4,0,1,2],6:[3,4,2,5,0,1],7:[3,4,1,6,2,5,0],8:[0,7,3,4,1,6,2,5]}[n];
+        const seeds=[...tournamentSides];tournamentSides=map.map(index=>seeds[index]);
+      }
+      set.tournamentBracketVersion=2;
+      set.bracketSize=2**Math.ceil(Math.log2(n));
+      const slotMap={3:[2,null,0,1],4:[0,1,2,3],5:[2,null,0,1,3,null,4,null],6:[4,null,0,1,5,null,2,3],7:[6,null,0,1,2,3,4,5],8:[0,1,2,3,4,5,6,7]}[n];
+      set.bracketSlots=slotMap.map(index=>index===null?null:tournamentSides[index].name);
+      }
       let tournamentMode = set.tournamentMode || $("ntournament-mode").value;
       if(set.mode === "total" && !set.tournamentMode) {
         tournamentMode = set.games > 1 ? "match_total" : "game1";
@@ -2275,7 +2486,10 @@ async function createSet(set, replacement=null){
       }
       const addMatch=(bracket,sides,nextWin=null,nextLose=null)=>{const start=resolvePlayoffStart(set,sides.filter(Boolean));matches.push({sides,start,gameStarts:[start],gameFirstRule:set.gameFirstRule||"rotate",throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode,bracket,nextWin,nextLose});};
       const edge=(match,slot)=>({match,slot});
-      if(n===3) {
+      if(n>8){
+        const layout=buildLargeTournament(set,tournamentSides,tournamentMode);matches=layout.matches;
+        set.bracketSize=layout.bracketSize;set.bracketSlots=layout.bracketSlots;set.bracketNodeMap=layout.bracketNodeMap;set.tournamentBracketVersion=2;set.consolationEnabled=false;
+      } else if(n===3) {
         addMatch("m1",[tournamentSides[0],tournamentSides[1]],edge("final",0),edge("placement",0));
         addMatch("final",[null,tournamentSides[2]]);
         addMatch("placement",[null,tournamentSides[2]]);
@@ -2302,9 +2516,8 @@ async function createSet(set, replacement=null){
       } else if(n===7) {
         addMatch("m1",[tournamentSides[0],tournamentSides[1]],edge("semi1",1),edge("loser_round1",0));
         addMatch("m2",[tournamentSides[2],tournamentSides[3]],edge("semi2",0),edge("loser_round1",1));
-        addMatch("m3",[tournamentSides[4],tournamentSides[5]],edge("semi2",1),edge("loser_round2",1));
-        addMatch("loser_round1",[null,null],edge("loser_round2",0));
-        addMatch("loser_round2",[null,null]);
+        addMatch("m3",[tournamentSides[4],tournamentSides[5]],edge("semi2",1),edge("loser_round1",2));
+        addMatch("loser_round1",[null,null,null]);
         addMatch("semi1",[tournamentSides[6],null],edge("final",0),edge("bronze",0));
         addMatch("semi2",[null,null],edge("final",1),edge("bronze",1));
         addMatch("bronze",[null,null]);
@@ -2321,8 +2534,22 @@ async function createSet(set, replacement=null){
         addMatch("bronze",[null,null]);
         addMatch("final",[null,null]);
       }
+      if(n>=6&&n<=8){
+        const stage=match=>/^m\d+$/.test(match.bracket)?0:match.bracket.startsWith("semi")?1:match.bracket.startsWith("loser_round")?2:match.bracket==="bronze"?3:4;
+        matches.sort((a,b)=>stage(a)-stage(b));
+      }
+      set.consolationEnabled=set.consolationEnabled!==false;
+      if(!set.consolationEnabled){
+        const removed=new Set(["placement","consolation","loser_round1","loser_round2"]);
+        matches=matches.filter(match=>!removed.has(match.bracket));
+        matches.forEach(match=>{if(match.nextWin&&removed.has(match.nextWin.match))match.nextWin=null;if(match.nextLose&&removed.has(match.nextLose.match))match.nextLose=null;});
+      }
       if(tournamentMode === "match_total") {
         matches.forEach(match => { match.gamesToPlay = Math.max(1, parseInt(set.games, 10) || 1); });
+      }
+      if(n===7&&set.consolationEnabled){
+        const exchange=matches.find(match=>match.bracket==="loser_round1");
+        exchange.tournamentMode="game1";exchange.fixedFiftyPoint=true;delete exchange.gamesToPlay;
       }
     } else if(isLeagueSet(set.type)){
       const pairs = [];
@@ -2416,7 +2643,7 @@ $("mkset").onclick=()=>{
   const type=$("ntype").value; let sides;
   if(isTeamSet(type)){sides=getTeamSides();} else{sides=getSoloSides();}
   if(sides.length<2){alert("2つ以上のサイド（メンバー）を選んでください");return;}
-  if(isTournamentSet(type) && (sides.length < 3 || sides.length > 8)){alert("トーナメントモードは3～8人（チーム）で利用できます");return;}
+  if(isTournamentSet(type) && (sides.length < 3 || sides.length > 16)){alert("トーナメントモードは3～16人（チーム）で利用できます");return;}
   if(type==="team_league" && sides.length<3){alert("団体リーグ戦は3チーム以上必要です");return;}
   
   const games = Math.max(1,Math.min(99,parseInt($("ngames").value)||1));
@@ -2424,15 +2651,15 @@ $("mkset").onclick=()=>{
   const overRule=$("noverrule").value;
   isOrderHidden = false;
   const mode = type === "team" || type === "solo" ? $("nmode").value : "fixed";
-  createSet({type, sides, mode, games, missRule, overRule, firstRule:$("nfirst").value, gameFirstRule:isTournamentSet(type)?$("ntournament-game-first").value:isLeagueSet(type)?$("league-game-first").value:"rotate", ...(isTournamentSet(type) ? {tournamentMode:$("ntournament-mode").value} : {})});
+  createSet({type, sides, mode, games, missRule, overRule, firstRule:$("nfirst").value, gameFirstRule:isTournamentSet(type)?$("ntournament-game-first").value:isLeagueSet(type)?$("league-game-first").value:"rotate", ...(isTournamentSet(type) ? {tournamentMode:$("ntournament-mode").value,consolationEnabled:$("ntournament-consolation").value!=="none"} : {})});
 };
 
 $("copyset").onclick=()=>{
   const l=data.sets[data.sets.length-1];
   if(!l){alert("コピーできる前のセットがありません");return;}
-  if(isTournamentSet(l.type) && (l.sides.length < 3 || l.sides.length > 8)){alert("トーナメントモードは3～8人（チーム）で利用できます");return;}
+  if(isTournamentSet(l.type) && (l.sides.length < 3 || l.sides.length > 16)){alert("トーナメントモードは3～16人（チーム）で利用できます");return;}
   isOrderHidden = false;
-  createSet({type:l.type, sides:l.sides, mode:l.mode, games:l.games, missRule:l.missRule||"out", overRule:l.overRule||"25", firstRule:l.firstRule, gameFirstRule:l.gameFirstRule||"rotate", ...(l.tournamentMode ? {tournamentMode:l.tournamentMode} : {})});
+  createSet({type:l.type, sides:l.sides, mode:l.mode, games:l.games, missRule:l.missRule||"out", overRule:l.overRule||"25", firstRule:l.firstRule, gameFirstRule:l.gameFirstRule||"rotate", ...(l.tournamentMode ? {tournamentMode:l.tournamentMode,consolationEnabled:l.consolationEnabled!==false} : {})});
 };
 
 $("addbtn").onclick=async()=>{
@@ -2674,7 +2901,7 @@ function supportsFutureGameChange(set){
 }
 function futureGameCandidates(set){
   if(!supportsFutureGameChange(set))return [];
-  return set.matches.map((match,index)=>({match,index})).filter(({match,index})=>index>=(set.activeMatchIndex||0)&&!match.skipped&&(match.currentGameIndex||0)===0&&!hasSetThrows({matches:[match]}));
+  return set.matches.map((match,index)=>({match,index})).filter(({match,index})=>index>=(set.activeMatchIndex||0)&&!match.fixedFiftyPoint&&!match.skipped&&(match.currentGameIndex||0)===0&&!hasSetThrows({matches:[match]}));
 }
 function plannedGameCount(match){
   return match.tournamentMode==="match2_total"?2:match.tournamentMode==="game1"||!match.tournamentMode?1:Math.max(1,parseInt(match.gamesToPlay,10)||2);
@@ -2810,6 +3037,9 @@ async function proceedToNextStep(customSides) {
         match.throws = match[nextGameKey];
         return;
       }
+      if((match.customSides||match.sides).length>2&&gIdx>=gamesToPlay-1&&getMatchWinner(match,s.missRule,s.overRule,isTeamSet(s.type))===null){
+        match.currentGameIndex=gIdx+1;match[`game${gIdx+2}`]=[];ensureGameStart(s,match,gIdx+1);match.throws=match[`game${gIdx+2}`];return;
+      }
       if(gIdx === gamesToPlay - 1) {
         const sides = match.customSides || match.sides;
         const totals = sides.map(() => 0);
@@ -2828,11 +3058,12 @@ async function proceedToNextStep(customSides) {
       }
     } else if (mode === "game2_wins") {
       const wins = (match.customSides || match.sides).map(() => 0);
-      [g1, g2, g3].forEach((game,gameIndex) => {
+      recordedGameIndices(match).forEach(gameIndex => {
+        const game=getGameThrows(match,gameIndex);
         const result = replay(match.customSides || match.sides, game, getGameStart(match,gameIndex), isTeamSet(s.type), s.missRule, s.overRule,getGameSideOrder(match,gameIndex));
         if(result.winner !== null) wins[result.winner]++;
       });
-      if(Math.max(...wins) < 2 && gIdx < 2) {
+      if(Math.max(...wins) < 2 && gIdx < (match.customSides||match.sides).length) {
         match.currentGameIndex = gIdx + 1;
         ensureGameStart(s,match,match.currentGameIndex);
         match.throws = getGameThrows(match, match.currentGameIndex);
@@ -3438,6 +3669,7 @@ $("save-solo-blocks").onclick = async () => {
 
 function getTournamentMatchLabel(match,index){
   const labels={m1:"1回戦①",m2:"1回戦②",m3:"1回戦③",m4:"1回戦④",semi1:"準決勝①",semi2:"準決勝②",loser_round1:"敗者交流戦",loser_round2:"敗者戦",consolation:"交流戦",bronze:"3位決定戦",placement:"順位決定戦",final:"決勝"};
+  if(match.bracketRound>4)return `${match.bracketRound===16?"1回戦":"準々決勝"}${(match.roundMatchNumber||Number(match.bracket.split("_")[1]))}`;
   return labels[match.bracket]||`試合${index+1}`;
 }
 function getTournamentSlotLabel(set,target,slot){
@@ -3570,11 +3802,11 @@ $("set-members-save").onclick=async()=>{
   const draft=structuredClone(setMemberDraft),set=data.sets.find(item=>item.id===draft.id);
   if(!set||!canEditSetMembers(set)||setMemberFingerprint(set)!==draft.baseline){alert("セットが更新されています。内容を確認してください。");return false;}
   const sides=isTeamSet(set.type)?draft.teams.map((name,i)=>({name,players:draft.rows.filter(row=>row.side===i).map(row=>row.name)})).filter(side=>side.players.length):draft.rows.filter(row=>row.side===0).map(row=>({name:row.name,players:[row.name]}));
-  if(sides.length<2||(isTournamentSet(set.type)&&(sides.length<3||sides.length>8))||(set.type==="team_league"&&sides.length<3)){alert("個人戦・団体戦は2サイド以上、団体リーグは3チーム以上、トーナメントは3～8サイド必要です。");return false;}
+  if(sides.length<2||(isTournamentSet(set.type)&&(sides.length<3||sides.length>16))||(set.type==="team_league"&&sides.length<3)){alert("個人戦・団体戦は2サイド以上、団体リーグは3チーム以上、トーナメントは3～16サイド必要です。");return false;}
   const oldNames=setMemberNames(set),newNames=sides.flatMap(side=>isTeamSet(set.type)?side.players:[side.name]);
   if(JSON.stringify(sides)===JSON.stringify(set.sides)){ $("set-members-status").textContent="参加者の変更はありません。";$("set-members-card").open=false;return true;}
   if(!confirm("参加者を変更し、対戦表・ブロック設定・投球順の調整を作り直します。よろしいですか？"))return false;
-  const config={};for(const key of ["type","name","mode","games","missRule","overRule","firstRule","gameFirstRule","tournamentMode","sourceLeagueSetId","sourceLeagueName","playoffFirstRule","playoffDrawMode"])if(set[key]!==undefined)config[key]=set[key];
+  const config={};for(const key of ["type","name","mode","games","missRule","overRule","firstRule","gameFirstRule","tournamentMode","sourceLeagueSetId","sourceLeagueName","playoffFirstRule","playoffDrawMode","consolationEnabled"])if(set[key]!==undefined)config[key]=set[key];
   if(set.playoffRanks){
     const ranks=new Map(Object.entries(set.playoffRanks).filter(([,rank])=>Number.isFinite(rank)&&rank>0));
     let lastRank=Math.max(0,...ranks.values());
@@ -3660,9 +3892,10 @@ function renderSet(set){
     else if (m.bracket === "final") stageName = "【決勝戦】";
   }
 
+  if(set.tournamentBracketVersion===2)stageName=`【${getNewTournamentLabel(set,m)}】`;
   const totalGames = m.tournamentMode === "match2_total" ? 2 : (parseInt(m.gamesToPlay, 10) || 1);
-  const modeLabel = (m.tournamentMode === "match_total" || m.tournamentMode === "match2_total") ? ` (${totalGames}ゲーム合計 ${gIdx < totalGames ? `ゲーム${gIdx+1}/${totalGames}` : "同点決着ゲーム"})` : m.tournamentMode === "game2_wins" ? ` (最大3ゲーム・2本先取)` : ` (1本勝負)`;
-  $("setinfo").textContent=isTournamentSet(set.type) ? `トーナメント戦 ${stageName}${modeLabel}` : isLeagueSet(set.type) ? `${m.blockName ? `${m.blockName}・` : ""}${m.leaguePlayoff ? "優勝決定プレーオフ" : `総当たりリーグ戦 【第${activeIdx+1}試合】`}${m.tournamentMode === "match_total" ? modeLabel : ""}` : ordinaryProgressText(set,m);
+  const modeLabel = (m.tournamentMode === "match_total" || m.tournamentMode === "match2_total") ? ` (${totalGames}ゲーム合計 ${gIdx < totalGames ? `ゲーム${gIdx+1}/${totalGames}` : "同点決着ゲーム"})` : m.tournamentMode === "game2_wins" ? ` (最大${customSides.length+1}ゲーム・2本先取)` : ` (1本勝負)`;
+  $("setinfo").textContent=isTournamentSet(set.type) ? `トーナメント戦 ${set.consolationEnabled===false?"（交流戦なし）":"（交流戦あり）"}${stageName}${modeLabel}` : isLeagueSet(set.type) ? `${m.blockName ? `${m.blockName}・` : ""}${m.leaguePlayoff ? "優勝決定プレーオフ" : `総当たりリーグ戦 【第${activeIdx+1}試合】`}${m.tournamentMode === "match_total" ? modeLabel : ""}` : ordinaryProgressText(set,m);
   $("final").innerHTML=(set.archived?`<div class="banner">中断保存済み（セット勝敗なし）</div><p class="pl">決着済みゲームのみ通算成績へ反映しています。途中の記録は閲覧用に保持しています。</p>`:S.over ? `<div class="banner">🏆 ${S.winnerNames && S.winnerNames.length ? `セット優勝：${S.winnerNames.map(name => esc(name)).join("・")}` : "セットの全日程が終了しました！"}</div>`:"" )+
     (S.over&&!set.archived&&isLeagueSet(set.type)?renderLeaguePlayoffPanel(set):"");
   const createPlayoffButton=$("create-league-playoff");
@@ -3672,6 +3905,7 @@ function renderSet(set){
     const linkedIndex=data.sets.findIndex(item=>item.sourceLeagueSetId===set.id);
     if(linkedIndex>=0){cur=linkedIndex;view="set";render();}
   };
+  if(S.over&&!set.archived&&isLeagueSet(set.type))syncLeagueTournamentExchange();
   const playoffModeSelect=$("league-playoff-mode");
   if(playoffModeSelect){const sync=()=>$("league-playoff-game-first-box").classList.toggle("hide",playoffModeSelect.value==="game1");playoffModeSelect.onchange=sync;sync();}
   
@@ -3718,6 +3952,7 @@ function renderSet(set){
         else if (mt.bracket === "final") bLabel = "【決勝戦】";
       }
       if(mt.leaguePlayoff) bLabel = "【優勝決定プレーオフ】";
+      if(set.tournamentBracketVersion===2)bLabel=`【${getNewTournamentLabel(set,mt)}】`;
       const currentMark = (idx === activeIdx && !S.over) ? " 👈 現在の対戦" : "";
       const vsString = mSides.map((side,slot)=>side?sideLabel(set,side):(isTournamentSet(set.type)?getTournamentSlotLabel(set,mt,slot):"未定")).join(" vs ");
       const scoreText = isLeagueSet(set.type) ? getMatchScoreHTML(mt,set) : "";
@@ -3727,7 +3962,10 @@ function renderSet(set){
       const finalMatch=set.matches.find(match=>match.bracket==="final"),bronzeMatch=set.matches.find(match=>match.bracket==="bronze");
       const finalWinner=finalMatch?getMatchWinner(finalMatch,set.missRule,set.overRule,isTeamSet(set.type)):null;
       const bronzeWinner=bronzeMatch?getMatchWinner(bronzeMatch,set.missRule,set.overRule,isTeamSet(set.type)):null;
-      if(set.sides.length===3&&S.over) {
+      if(set.tournamentBracketVersion===2&&S.over){
+        const standings=getTournamentStandings(set),counts=new Map();standings.forEach(row=>counts.set(row.rank,(counts.get(row.rank)||0)+1));
+        treeHtml+=`<h4>大会順位</h4><table><tr><th>順位</th><th>参加者</th></tr>`+standings.map(row=>`<tr><td>${counts.get(row.rank)>1?"同率":""}${row.rank}位</td><td>${sideLabel(set,{name:row.name})}</td></tr>`).join("")+`</table>`;
+      } else if(set.sides.length===3&&S.over) {
         const podiumRows=getThreePlayerTournamentStandings(set).map(row=>[`${row.rank}位`,row.name]);
         treeHtml+=`<h4>大会順位</h4><table><tr><th>区分</th><th>参加者</th></tr>`+podiumRows.map(row=>`<tr><td>${esc(row[0])}</td><td>${sideLabel(set,{name:row[1]})}</td></tr>`).join("")+`</table>`;
       } else if(set.sides.length===7&&S.over&&set.matches.some(match=>match.bracket==="loser_round2")) {
@@ -3761,6 +3999,7 @@ function renderSet(set){
       treeHtml += standings.map(block=>`<h4>${esc(block.name)}順位</h4><table><tr><th>順位</th><th>名前</th><th>試合</th><th>勝</th><th>総得点</th><th>失点</th><th>得失点</th><th>直接対決</th></tr>`+
         block.standings.map(row=>`<tr><td>${row.rank}</td><td>${sideLabel(set,{name:row.name})}</td><td>${row.matchesPlayed}</td><td>${row.wins}</td><td>${row.pointsFor}</td><td>${row.pointsAgainst}</td><td>${row.differential}</td><td>${row.headToHeadWins}</td></tr>`).join("")+`</table>`).join("");
     }
+    if(set.tournamentBracketVersion===2)treeHtml=renderPowerTournamentBracket(set)+"<h4>対戦スケジュール</h4>"+treeHtml;
     $("tournament-tree-content").innerHTML = treeHtml;
     $("tournament-tree-content").style.display = isScheduleHidden ? "none" : "block";
     $("toggle-tournament-overview").textContent = isScheduleHidden ? "展開する" : "折りたたむ";
