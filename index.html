@@ -76,7 +76,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.77</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.84</span></h1>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -202,7 +202,7 @@ td.l,th.l{text-align:left}
 <label id="first-game-rule-label"><span id="first-game-rule-title">第1ゲームの先攻（並び順）</span> <select id="nfirstgame">
 <option value="order">登録順（ルームの参加者登録順）</option>
 <option value="custom">カスタム（参加者一覧の並び順）</option>
-<option value="shuffle">ランダム（シャッフル）</option>
+<option value="shuffle" selected>ランダム（シャッフル）</option>
 <option value="reverse">逆順（後ろから）</option>
 </select></label>
 <label id="second-game-rule-label">2ゲーム目以降の投球順 <select id="nfirst">
@@ -921,7 +921,7 @@ function syncGameFirstRuleVisibility(){
 }
 
 let newSetOrderKind="ordinary";
-const newSetOrderChoices={ordinary:"order",tournament:"shuffle"};
+const newSetOrderChoices={ordinary:"shuffle",tournament:"shuffle"};
 $("ntype").onchange=()=>{
   const type=$("ntype").value;
   const orderKind=isTournamentSet(type)?"tournament":"ordinary";
@@ -935,10 +935,14 @@ $("ntype").onchange=()=>{
   $("tournament-setting-box").classList.toggle("hide", !isTournamentSet(type));
   $("n-mode-box").classList.toggle("hide", isTournamentSet(type) || isLeagueSet(type));
   $("league-games-desc").classList.toggle("hide", !isLeagueSet(type));
-  // 総当たりリーグは対戦カードが1回ずつ、トーナメントは勝ち上がりで相手が変わるため、通常の次戦先攻設定は適用しない。
-  $("first-game-rule-label").classList.toggle("hide", isLeagueSet(type));
+  // リーグの第1ゲームにも適用。次戦の条件と、同一カード内の次ゲーム条件は別に扱う。
+  $("first-game-rule-label").classList.remove("hide");
+  const orderOption=$("nfirstgame").querySelector('option[value="order"]');
+  const customOption=$("nfirstgame").querySelector('option[value="custom"]');
+  if(orderOption)orderOption.textContent=isTeamSet(type)?"標準順（赤→白→青…）":"登録順（ルームの参加者登録順）";
+  if(customOption)customOption.textContent=isTeamSet(type)?"カスタム（チーム一覧の並び順）":"カスタム（参加者一覧の並び順）";
   $("second-game-rule-label").classList.toggle("hide", type!=="team"&&type!=="solo");
-  $("first-game-rule-title").textContent=isTournamentSet(type)?"トーナメントの組み合わせ順":"第1ゲームの先攻（並び順）";
+  $("first-game-rule-title").textContent=isTournamentSet(type)?"トーナメントの組み合わせ順":isLeagueSet(type)?"各対戦の第1ゲームの先攻（並び順）":"第1ゲームの先攻（並び順）";
   $("nglabel").textContent = isLeagueSet(type)||isTournamentSet(type)?"ゲーム数":$("nmode").value === "first"?"何勝先取？":"ゲーム数";
   syncTournamentModeFromGeneralSettings();
   syncGameFirstRuleVisibility();
@@ -1315,6 +1319,8 @@ function isMyTurn(){
 const teamNamesDefault = ["赤チーム", "白チーム", "青チーム", "黄チーム", "緑チーム", "紫チーム", "橙チーム", "桃チーム",...Array.from({length:8},(_,i)=>`チーム${i+9}`)];
 let teamAssignments = Object.create(null);
 let teamOrder = {};
+// チームへの所属と、チーム内の投球順は別々に保持する。
+const teamMemberOrder=Object.create(null);
 
 function scoreSideKey(side, type) {
   return isTeamSet(type) ? `team:${side.name}` : `player:${side.players[0] || side.name}`;
@@ -1838,11 +1844,11 @@ function prepareNewSetParticipants(){
   // 前セットに含まれない人を、古い作成画面の割り当てから除く。
   for(const assignments of Object.values(teamAssignments))for(const name of Object.keys(assignments))if(!newSetParticipantDefaults.selected.has(name))delete assignments[name];
   if(isTeamSet(last.type)&&last.sides.length>=2&&last.sides.length<=16){
-    const count=last.sides.length,used=new Set();teamAssignments[count]=Object.create(null);
+    const count=last.sides.length,used=new Set();teamAssignments[count]=Object.create(null);teamMemberOrder[count]=Object.create(null);
     teamOrder[count]=last.sides.map((side,index)=>{
       let teamIndex=teamNamesDefault.indexOf(side.name);
       if(teamIndex<0||teamIndex>=count||used.has(teamIndex))teamIndex=Array.from({length:count},(_,i)=>i).find(i=>!used.has(i));
-      used.add(teamIndex);side.players.forEach(name=>teamAssignments[count][name]=teamIndex);return teamIndex;
+      used.add(teamIndex);side.players.forEach(name=>teamAssignments[count][name]=teamIndex);teamMemberOrder[count][teamIndex]=[...side.players];return teamIndex;
     });
     $("teamcount").value=String(count);
   }
@@ -1870,6 +1876,37 @@ function syncLeagueTournamentExchange(){
 $("solo-containers").addEventListener("change",syncNewTournamentExchange);
 $("team-containers").addEventListener("change",syncNewTournamentExchange);
 
+// 再生成前に、画面で調整したチーム順・メンバー順を取り込む。
+function captureTeamFormState(count,busyMembers){
+  if(!teamAssignments[count]) {
+    teamAssignments[count] = Object.create(null);
+  }
+  
+  if(!Array.isArray(teamOrder[count]) || teamOrder[count].length !== count) {
+    teamOrder[count] = Array.from({length: count}, (_, i) => i);
+  }
+  if(!teamMemberOrder[count])teamMemberOrder[count]=Object.create(null);
+  const existingCards = [...document.querySelectorAll(".team-card")];
+  if(existingCards.length === count) {
+    const visualOrder = existingCards.map(card => parseInt(card.dataset.index, 10));
+    if(visualOrder.every(i => Number.isInteger(i) && i >= 0 && i < count) && new Set(visualOrder).size === count) {
+      teamOrder[count] = visualOrder;
+    }
+    existingCards.forEach(card => {
+      const teamIndex = parseInt(card.dataset.index, 10);
+      if(!Number.isInteger(teamIndex) || teamIndex < 0 || teamIndex >= count) return;
+      const memberOrder=[];
+      card.querySelectorAll(".team-member-item").forEach(item => {
+        const chk = item.querySelector("input[type=checkbox]");
+        const nameVal = item.dataset.name;
+        if(chk && chk.checked && nameVal&&!busyMembers.has(nameVal)){teamAssignments[count][nameVal]=teamIndex;memberOrder.push(nameVal);}
+      });
+      teamMemberOrder[count][teamIndex]=memberOrder;
+    });
+  }
+  
+}
+
 function updateTeamCheckboxes(){
   if(!data) return;
   if(newSetParticipantDefaults){
@@ -1880,30 +1917,8 @@ function updateTeamCheckboxes(){
   const players = data.players;
   const busyMembers = getActiveMembersInOtherSets();
   
-  if(!teamAssignments[count]) {
-    teamAssignments[count] = Object.create(null);
-  }
-  
-  if(!Array.isArray(teamOrder[count]) || teamOrder[count].length !== count) {
-    teamOrder[count] = Array.from({length: count}, (_, i) => i);
-  }
-  const existingCards = [...document.querySelectorAll(".team-card")];
-  if(existingCards.length === count) {
-    const visualOrder = existingCards.map(card => parseInt(card.dataset.index, 10));
-    if(visualOrder.every(i => Number.isInteger(i) && i >= 0 && i < count) && new Set(visualOrder).size === count) {
-      teamOrder[count] = visualOrder;
-    }
-    existingCards.forEach(card => {
-      const teamIndex = parseInt(card.dataset.index, 10);
-      if(!Number.isInteger(teamIndex) || teamIndex < 0 || teamIndex >= count) return;
-      card.querySelectorAll(".team-member-item").forEach(item => {
-        const chk = item.querySelector("input[type=checkbox]");
-        const nameVal = item.dataset.name;
-        if(chk && chk.checked && nameVal&&!busyMembers.has(nameVal)) teamAssignments[count][nameVal] = teamIndex;
-      });
-    });
-  }
-  
+  captureTeamFormState(count,busyMembers);
+
   busyMembers.forEach(name=>delete teamAssignments[count][name]);
   const assignedMembers = new Set();
   Object.keys(teamAssignments[count]).forEach(n => {
@@ -1915,6 +1930,8 @@ function updateTeamCheckboxes(){
   let html="";
   for(const i of teamOrder[count]){
     const teamName = teamNamesDefault[i] || `チーム${i+1}`;
+    const knownPlayers=new Set(players);
+    const orderedPlayers=[...new Set([...(teamMemberOrder[count][i]||[]).filter(name=>knownPlayers.has(name)),...players])];
     html += `<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px; background:${teamCardColor(teamName)};" class="team-card" data-index="${i}">
       <b>${teamName}</b>
       <span style="float:right;display:inline-flex;gap:4px;">
@@ -1922,7 +1939,7 @@ function updateTeamCheckboxes(){
         <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeam(${i}, 'down')">[DOWN]</button>
       </span>
       <div class="chk team-chk-group" style="margin-top:6px;">` +
-      players.map(n => {
+      orderedPlayers.map(n => {
         const isBusy = busyMembers.has(n);
         const isHere = (teamAssignments[count][n] === i);
         if(isBusy) return '';
@@ -1980,7 +1997,12 @@ $("random-team-assign").onclick=()=>{
   Object.keys(teamAssignments[count]).forEach(name=>{
     if(!busyMembers.has(name)&&!/^.+の\d+人目$/.test(name))delete teamAssignments[count][name];
   });
-  randomAssign(candidates,count).forEach((members,teamIndex)=>members.forEach(name=>{teamAssignments[count][name]=teamIndex;}));
+  const groups=randomAssign(candidates,count);
+  teamMemberOrder[count]=Object.create(null);
+  groups.forEach((members,teamIndex)=>{
+    teamMemberOrder[count][teamIndex]=[...members];
+    members.forEach(name=>{teamAssignments[count][name]=teamIndex;});
+  });
   // 既存カードのチェック状態が新しい割当を上書きしないよう、先にカードを外す
   $("team-containers").innerHTML="";
   updateTeamCheckboxes();
@@ -1992,10 +2014,17 @@ $("teamcount").onchange = () => {
 
 $("add-opponent-btn").onclick = () => {
   if(!data) return;
-  const count = parseInt($("teamcount").value) || 2;
-  const targetTeamIndex = count - 1;
-  const size = parseInt($("opponent-size").value) || 2;
-  if(!teamAssignments[count]) teamAssignments[count] = Object.create(null);
+  const count=Number($("teamcount").value);
+  const size=Number($("opponent-size").value);
+  if(!Number.isInteger(count)||count<2||count>teamNamesDefault.length){
+    alert("チーム数は2〜16チームから選択してください。");return false;
+  }
+  if(!Number.isInteger(size)||size<1||size>10){
+    alert("対戦相手の人数は1〜10人の整数で入力してください。");return false;
+  }
+  // 人数変更前の手動順を記録し、変更後は古いチェックを読み戻さない。
+  captureTeamFormState(count,getActiveMembersInOtherSets());
+  const targetTeamIndex=count-1;
   const teamName = teamNamesDefault[targetTeamIndex] || `チーム${targetTeamIndex+1}`;
   const syntheticPrefix = `${teamName}の`;
   const previousSyntheticNames = Object.keys(teamAssignments[count]).filter(name =>
@@ -2007,16 +2036,23 @@ $("add-opponent-btn").onclick = () => {
     const stillAssigned = Object.values(teamAssignments).some(assignments => assignments && Object.prototype.hasOwnProperty.call(assignments, name));
     const usedInSavedSet = (data.sets || []).some(set => {
       const sides = [...(set.sides || []), ...(set.matches || []).flatMap(match => [...(match.sides || []), ...(match.customSides || [])])];
-      return sides.some(side => (side.players || []).includes(name));
+      return sides.some(side => (side?.players || []).includes(name));
     });
     if(!stillAssigned && !usedInSavedSet) data.players = data.players.filter(player => player !== name);
   });
+  const newSyntheticNames=[];
   for(let j=1; j<=size; j++) {
     const fakeName = `${teamName}の${j}人目`;
     if(!data.players.includes(fakeName)) data.players.push(fakeName);
     teamAssignments[count][fakeName] = targetTeamIndex;
+    newSyntheticNames.push(fakeName);
   }
+  const retainedOrder=(teamMemberOrder[count][targetTeamIndex]||[]).filter(name=>teamAssignments[count][name]===targetTeamIndex);
+  const retainedNames=new Set(retainedOrder);
+  teamMemberOrder[count][targetTeamIndex]=[...retainedOrder,...newSyntheticNames.filter(name=>!retainedNames.has(name))];
+  $("team-containers").innerHTML="";
   updateTeamCheckboxes();
+  return true;
 };
 
 window.handleTeamCheckboxChange = (chkElem, count) => {
@@ -2188,6 +2224,8 @@ $("toggle-order-edit-btn").onclick = () => {
 
 $("toggle-tournament-overview").onclick = () => {
   isScheduleHidden = !isScheduleHidden;
+  const set=data&&data.sets[cur];
+  if(set&&view==="set")renderSet(set);
   $("tournament-tree-content").style.display = isScheduleHidden ? "none" : "block";
   $("toggle-tournament-overview").textContent = isScheduleHidden ? "展開する" : "折りたたむ";
 };
@@ -2289,7 +2327,7 @@ function applyRoomSnapshot(snapshot,code,generation){
       else if(d.sets.length>prevLen){cur=d.sets.length-1;view="set";isOrderHidden=false;}
       if(cur>=d.sets.length)cur=d.sets.length-1;
       if(cur<0&&view==="set")view="new";
-      prevLen=d.sets.length;data=d;roomSnapshotVersion++;render();renderRoomSyncStatus();
+      prevLen=d.sets.length;data=d;roomSnapshotVersion++;updateScoreSaveUI();syncSharedTimerDisplay();requestRender();renderRoomSyncStatus();
 
 }
 function scheduleScoreRefresh(){
@@ -2429,8 +2467,29 @@ function shuffleArray(array) {
   return arr;
 }
 
+// 設定の解釈を全方式で統一する。元の一覧・チーム内メンバー順は変更しない。
+function getFirstGameSides(set,sides,registeredNames=data?.players||[]){
+  const rule=set.firstGameRule||"custom";
+  const ordered=[...sides];
+  if(rule==="shuffle")return shuffleArray(ordered);
+  if(rule==="reverse")return ordered.reverse();
+  if(rule!=="order")return ordered;
+  const reference=isTeamSet(set.type)?teamNamesDefault:registeredNames;
+  const positions=new Map(reference.map((name,index)=>[name,index]));
+  const inputOrder=new Map(ordered.map((side,index)=>[side.name,index]));
+  ordered.sort((a,b)=>{
+    const ai=positions.has(a.name)?positions.get(a.name):Number.MAX_SAFE_INTEGER;
+    const bi=positions.has(b.name)?positions.get(b.name):Number.MAX_SAFE_INTEGER;
+    return ai-bi||inputOrder.get(a.name)-inputOrder.get(b.name);
+  });
+  return ordered;
+}
+
 async function createSet(set, replacement=null){
   try {
+    const choices=["order","custom","shuffle","reverse"];
+    const selected=$("nfirstgame")?.value;
+    set={...set,firstGameRule:choices.includes(set.firstGameRule)?set.firstGameRule:choices.includes(selected)?selected:"order"};
     const names = isTeamSet(set.type) ? set.sides.flatMap(s=>s.players) : set.sides.map(s=>s.name);
     if(uniq(names).length!==names.length){alert("同じ名前が重複しています");return false;}
     
@@ -2444,28 +2503,8 @@ async function createSet(set, replacement=null){
         alert("トーナメントモードは3～16人で利用できます");
         return false;
       }
-      let tournamentSides=[...set.sides];
-      const firstGameRule=$("nfirstgame")?$("nfirstgame").value:"order";
-      if(set.fixedBracketOrder) {
-        tournamentSides=[...set.sides];
-      } else if(firstGameRule==="custom") {
-        // カスタムはセット作成画面で並べ替えた参加者順を使う
-        tournamentSides=[...set.sides];
-      } else if(firstGameRule==="shuffle") {
-        tournamentSides=shuffleArray(tournamentSides);
-      } else if(firstGameRule==="reverse") {
-        tournamentSides.reverse();
-      } else {
-        // 登録順はルームに登録された順を優先し、新規参加者は選択順を保つ
-        const selectedOrder=new Map(tournamentSides.map((side,index)=>[side.name,index]));
-        const registeredOrder=Array.isArray(data?.players)?data.players:[];
-        const registrationIndex=new Map(registeredOrder.map((name,index)=>[name,index]));
-        tournamentSides.sort((a,b)=>{
-          const ai=registrationIndex.has(a.name)?registrationIndex.get(a.name):Number.MAX_SAFE_INTEGER;
-          const bi=registrationIndex.has(b.name)?registrationIndex.get(b.name):Number.MAX_SAFE_INTEGER;
-          return ai-bi || selectedOrder.get(a.name)-selectedOrder.get(b.name);
-        });
-      }
+      const tournamentSidesInput=set.fixedBracketOrder?[...set.sides]:getFirstGameSides(set,set.sides);
+      let tournamentSides=[...tournamentSidesInput];
       const n = tournamentSides.length;
       if(n<=8){
       if(!set.sourceLeagueSetId){
@@ -2562,7 +2601,7 @@ async function createSet(set, replacement=null){
       const leagueMode = "match_total";
       matches = shuffledPairs.map(p => {
         const match = {
-          sides: [p[0], p[1]],
+          sides:getFirstGameSides(set,p),
           start: 0,
           gameStarts: [0],
           gameFirstRule: set.gameFirstRule || "rotate",
@@ -2578,26 +2617,23 @@ async function createSet(set, replacement=null){
       });
     } else {
       const n = set.sides.length;
-      const firstGameRule = $("nfirstgame") ? $("nfirstgame").value : "order";
-      
+      // 一度決めた全サイドの並びを、その後の先攻条件の基準にする。
+      const initialOrder=getFirstGameSides(set,set.sides);
       for(let g = 0; g < totalGames; g++) {
         let startIdx = 0;
-        if(g === 0) {
-          if(firstGameRule==="shuffle"){ startIdx = Math.floor(Math.random()*n); }
-          else if(firstGameRule==="reverse"){ startIdx = n-1; }
-        } else {
+        if(g > 0) {
           const prevMatch = matches[g - 1];
           // 先取り方式以外の試合は先に予定を作るため、敗者先攻は試合終了時に確定する。
           startIdx = set.firstRule==="rotate" ? ((prevMatch.start+1)%n) : 0;
         }
         
-        let initialSides = [set.sides[0], set.sides[1]];
+        let initialSides = [initialOrder[0],initialOrder[1]];
         if(isTeamSet(set.type) && set.sides.length >= 2) {
           // 団体戦は選択した全チームが同じ1試合に参加する
-          initialSides = [...set.sides];
+          initialSides = [...initialOrder];
         } else if(set.type === "solo" && set.sides.length >= 2) {
           // 個人フリーはブロック内の全員が同じ試合に参加する
-          initialSides = [...set.sides];
+          initialSides = [...initialOrder];
         }
 
         matches.push({
@@ -2659,7 +2695,7 @@ $("copyset").onclick=()=>{
   if(!l){alert("コピーできる前のセットがありません");return;}
   if(isTournamentSet(l.type) && (l.sides.length < 3 || l.sides.length > 16)){alert("トーナメントモードは3～16人（チーム）で利用できます");return;}
   isOrderHidden = false;
-  createSet({type:l.type, sides:l.sides, mode:l.mode, games:l.games, missRule:l.missRule||"out", overRule:l.overRule||"25", firstRule:l.firstRule, gameFirstRule:l.gameFirstRule||"rotate", ...(l.tournamentMode ? {tournamentMode:l.tournamentMode,consolationEnabled:l.consolationEnabled!==false} : {})});
+  createSet({type:l.type, sides:l.sides, mode:l.mode, games:l.games, missRule:l.missRule||"out", overRule:l.overRule||"25", firstRule:l.firstRule, firstGameRule:l.firstGameRule, gameFirstRule:l.gameFirstRule||"rotate", ...(l.tournamentMode ? {tournamentMode:l.tournamentMode,consolationEnabled:l.consolationEnabled!==false} : {})});
 };
 
 $("addbtn").onclick=async()=>{
@@ -3184,7 +3220,12 @@ async function proceedToNextStep(customSides) {
         const tiedSides = s.sides.filter(side => totals.get(scoreSideKey(side, s.type)) === maxScore);
         if(tiedSides.length > 1) {
           const previousMatch=regularMatches[regularMatches.length-1];
-          const tieBreak = {sides:tiedSides, start:getNextFirstSideIndex(s,previousMatch,tiedSides), throws:[], game1:[], game2:[], game3:[], currentGameIndex:0, tournamentMode:"game1", totalTiebreak:true};
+          const previousSides=previousMatch.customSides||previousMatch.sides;
+          const tiedNames=new Set(tiedSides.map(side=>side.name));
+          const inherited=getGameSideOrder(previousMatch,0).map(index=>previousSides[index]).filter(side=>tiedNames.has(side.name));
+          const inheritedNames=new Set(inherited.map(side=>side.name));
+          const tieSides=[...inherited,...tiedSides.filter(side=>!inheritedNames.has(side.name))];
+          const tieBreak = {sides:tieSides, start:getNextFirstSideIndex(s,previousMatch,tieSides), throws:[], game1:[], game2:[], game3:[], currentGameIndex:0, tournamentMode:"game1", totalTiebreak:true};
           s.matches.push(tieBreak);
           s.activeMatchIndex=s.matches.length-1;
           return;
@@ -3403,9 +3444,13 @@ function syncSharedTimerDisplay(){
   $("timer-start-btn").disabled=disabled;$("timer-reset-btn").disabled=disabled;
 }
 function startTimer(){
-  if(matchTimerInterval)clearInterval(matchTimerInterval);
-  matchTimerInterval=null;syncSharedTimerDisplay();
-  if(isTimerRunning)matchTimerInterval=setInterval(()=>{
+  syncSharedTimerDisplay();
+  if(!isTimerRunning){
+    if(matchTimerInterval)clearInterval(matchTimerInterval);
+    matchTimerInterval=null;return;
+  }
+  if(matchTimerInterval)return;
+  matchTimerInterval=setInterval(()=>{
     if(view!=="set"||!data?.sets[cur])return;
     const target=sharedTimerTarget(data.sets[cur]),record=sharedTimerValue(data,target);
     timerSeconds=Math.floor(sharedTimerElapsed(record)/1000);updateTimerDisplay();
@@ -3422,7 +3467,73 @@ function updateTimerDisplay(){
 $("timer-start-btn").onclick=()=>changeSharedTimer(isTimerRunning?"pause":"start");
 $("timer-reset-btn").onclick=()=>changeSharedTimer("reset");
 
+// 描画計測は端末内・メモリー内のみ。明示的に有効にした間だけ集計する。
+// 各区間は入れ子を含むため、所要時間を足し合わせない。
+const renderDiagnostics={enabled:false,sections:new Map()};
+function renderClock(){
+  return typeof performance!=="undefined"&&typeof performance.now==="function"?performance.now():Date.now();
+}
+function measureRenderSection(name,action){
+  if(!renderDiagnostics.enabled)return action();
+  const started=renderClock();
+  try{return action();}
+  finally{
+    const elapsed=Math.max(0,renderClock()-started);
+    const row=renderDiagnostics.sections.get(name)||{count:0,totalMs:0,maxMs:0,lastMs:0};
+    row.count++;row.totalMs+=elapsed;row.maxMs=Math.max(row.maxMs,elapsed);row.lastMs=elapsed;
+    renderDiagnostics.sections.set(name,row);
+  }
+}
+window.molkkyRenderDiagnostics=Object.freeze({
+  setEnabled(enabled){renderDiagnostics.enabled=enabled===true;},
+  reset(){renderDiagnostics.sections.clear();},
+  snapshot(){return {enabled:renderDiagnostics.enabled,sections:Array.from(renderDiagnostics.sections,([name,row])=>({name,...row,averageMs:row.totalMs/row.count}))};}
+});
+
+let pendingRoomRender=null;
+function cancelRequestedRender(){
+  const ticket=pendingRoomRender;pendingRoomRender=null;
+  if(!ticket)return;
+  if(ticket.frame!==null&&typeof cancelAnimationFrame==="function")cancelAnimationFrame(ticket.frame);
+  if(ticket.timeout!==null)clearTimeout(ticket.timeout);
+}
+function requestRender(){
+  if(pendingRoomRender)return;
+  const ticket={frame:null,timeout:null};pendingRoomRender=ticket;
+  const flush=()=>{if(pendingRoomRender!==ticket)return;render();};
+  if(typeof requestAnimationFrame==="function"){
+    ticket.frame=requestAnimationFrame(flush);
+    // A background tab may stop animation frames; still reconcile received state.
+    ticket.timeout=setTimeout(flush,100);
+  }else queueMicrotask(flush);
+}
+function renderScreenIdentity(){
+  const set=view==="set"&&data?.sets[cur],match=set&&set.matches[set.activeMatchIndex||0];
+  return JSON.stringify([room,view,set?.id,set?.activeMatchIndex||0,match?.currentGameIndex||0]);
+}
+function preserveRenderInteraction(action){
+  const screen=renderScreenIdentity(),active=document.activeElement;
+  const focused=active&&active!==document.body?{node:active,id:active.id,start:active.selectionStart,end:active.selectionEnd,direction:active.selectionDirection}:null;
+  const x=window.scrollX,y=window.scrollY;
+  try{return action();}
+  finally{
+    if(screen===renderScreenIdentity()){
+      if(focused&&focused.node.isConnected===false&&(!document.activeElement||document.activeElement===document.body)){
+        const replacement=focused.id&&document.getElementById(focused.id);
+        if(replacement&&!replacement.disabled&&typeof replacement.focus==="function"){
+          replacement.focus({preventScroll:true});
+          if(Number.isInteger(focused.start)&&typeof replacement.setSelectionRange==="function")replacement.setSelectionRange(focused.start,focused.end,focused.direction||"none");
+        }
+      }
+      if(Number.isFinite(x)&&Number.isFinite(y)&&(window.scrollX!==x||window.scrollY!==y)&&typeof window.scrollTo==="function")window.scrollTo(x,y);
+    }
+  }
+}
 function render(){
+  cancelRequestedRender();
+  return preserveRenderInteraction(()=>measureRenderSection("app.total",renderAppFrame));
+}
+function renderAppFrame(){
   updateRoomCapacity();
   if(view!=="stats"&&historyWatchKey)stopHistoryWatch();
   const previousCache=replay.renderCache;
@@ -3444,14 +3555,14 @@ function render(){
   if(!$("me").value)currentPlayer="";
   $("restrict-my-turn").checked=!isAdmin()&&!hasInputLease(d);
   $("restrict-my-turn").disabled=isAdmin()||!currentPlayer||inputLeaseBusy;
-  $("tabs").innerHTML=sets.map((s,i)=>{
+  setHTMLIfChanged($("tabs"),sets.map((s,i)=>{
     const status=summarize(s);
     const stateClass=status.over?"finished":"active";
     const current=view==="set"&&cur===i;
     return `<button class="tab ${stateClass} ${current?"current on":""}" data-v="${i}">${esc(s.name)}${s.archived?"（中断保存）":""}</button>`;
   }).join("")+ 
                      `<button class="tab ${view==="new"}" data-v="new">＋新しいセット</button>`+
-                     `<button class="tab ${view==="stats"}" data-v="stats">📊通算成績</button>`;
+                     `<button class="tab ${view==="stats"}" data-v="stats">📊通算成績</button>`);
   document.querySelectorAll("#tabs button").forEach(btn => {
     const v = btn.dataset.v;
     const isActive = (view === "set" && cur.toString() === v) || (view === v);
@@ -3460,7 +3571,7 @@ function render(){
   $("v-new").classList.toggle("hide",view!=="new");
   $("v-set").classList.toggle("hide",view!=="set");
   $("v-stats").classList.toggle("hide",view!=="stats");
-  if(view!=="set")$("future-games-card").open=false;
+  if(view!=="set"){setSectionScreen="";$("future-games-card").open=false;}
   if(view==="set")renderSet(sets[cur]);
   if(view==="stats") {stopTimer(); renderStats();}
   updateScoreSaveUI();
@@ -3493,7 +3604,7 @@ function blockConfigFingerprint(set){
     if(!normalized.gameOrders[0])normalized.gameOrders[0]=Array.from({length:count},(_,index)=>(normalized.gameStarts[0]+index)%count);
     return normalized;
   });
-  return JSON.stringify(canonical([set.type,set.sides,set.blocks||[],set.blockCount||0,set.games,set.mode,set.firstRule,set.gameFirstRule,matches,set.activeMatchIndex||0,set.firstTargets||{},set.futureGameRevision||0]));
+  return JSON.stringify(canonical([set.type,set.sides,set.blocks||[],set.blockCount||0,set.games,set.mode,set.firstRule,set.firstGameRule||null,set.gameFirstRule,matches,set.activeMatchIndex||0,set.firstTargets||{},set.futureGameRevision||0]));
 }
 function hasSetThrows(set){
   return set.matches.some(match=>Object.keys(match).some(key=>(key==="throws"||/^game\d+$/.test(key))&&Array.isArray(match[key])&&match[key].length));
@@ -3621,7 +3732,7 @@ $("save-solo-blocks").onclick = async () => {
       const sides=block.players.map(name=>byName.get(name));
       const pairs=shuffleArray(sides.flatMap((side,i)=>sides.slice(i+1).map(opponent=>[side,opponent])));
       pairs.forEach(([a,b],i)=>{
-        const match={sides:[a,b],start:0,gameStarts:[0],gameFirstRule,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:leagueMode,blockName:block.name,round:i+1,blockOrder:blockIndex};
+        const match={sides:getFirstGameSides(set,[a,b]),start:0,gameStarts:[0],gameFirstRule,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:leagueMode,blockName:block.name,round:i+1,blockOrder:blockIndex};
         if(leagueMode === "match_total") match.gamesToPlay=Math.max(2,parseInt(set.games,10)||2);
         matches.push(match);
       });
@@ -3634,14 +3745,10 @@ $("save-solo-blocks").onclick = async () => {
     const roundsByBlock = groups.map(block=>set.mode === "first" ? 1 : totalGames);
     for(let blockIndex=0;blockIndex<groups.length;blockIndex++){
       const block=groups[blockIndex];
-      const sides=block.players.map(name=>byName.get(name));
+      const blockSides=block.players.map(name=>byName.get(name));
+      const sides=getFirstGameSides(set,blockSides);
       for(let round=0;round<roundsByBlock[blockIndex];round++) {
         let start=set.firstRule==="rotate"?round%sides.length:0;
-        if(round===0){
-          const firstGameRule=$("nfirstgame")?$("nfirstgame").value:"order";
-          if(firstGameRule==="shuffle")start=Math.floor(Math.random()*sides.length);
-          else if(firstGameRule==="reverse")start=sides.length-1;
-        }
         matches.push({sides,start,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:"game1",blockName:block.name,round:round+1});
       }
     }
@@ -3806,7 +3913,7 @@ $("set-members-save").onclick=async()=>{
   const oldNames=setMemberNames(set),newNames=sides.flatMap(side=>isTeamSet(set.type)?side.players:[side.name]);
   if(JSON.stringify(sides)===JSON.stringify(set.sides)){ $("set-members-status").textContent="参加者の変更はありません。";$("set-members-card").open=false;return true;}
   if(!confirm("参加者を変更し、対戦表・ブロック設定・投球順の調整を作り直します。よろしいですか？"))return false;
-  const config={};for(const key of ["type","name","mode","games","missRule","overRule","firstRule","gameFirstRule","tournamentMode","sourceLeagueSetId","sourceLeagueName","playoffFirstRule","playoffDrawMode","consolationEnabled"])if(set[key]!==undefined)config[key]=set[key];
+  const config={};for(const key of ["type","name","mode","games","missRule","overRule","firstRule","firstGameRule","gameFirstRule","tournamentMode","sourceLeagueSetId","sourceLeagueName","playoffFirstRule","playoffDrawMode","consolationEnabled"])if(set[key]!==undefined)config[key]=set[key];
   if(set.playoffRanks){
     const ranks=new Map(Object.entries(set.playoffRanks).filter(([,rank])=>Number.isFinite(rank)&&rank>0));
     let lastRank=Math.max(0,...ranks.values());
@@ -3827,7 +3934,7 @@ $("set-members-save").onclick=async()=>{
   finally{setMemberSaving=false;const latest=data.sets.find(item=>item.id===draft.id);if(latest&&data.sets[cur]?.id===draft.id)renderSetMemberEditor(latest);}
 };
 
-function renderSet(set){
+function createSetRenderContext(set){
   if(set.archived)selectedThrow=null;
   if(set.activeMatchIndex === undefined&&!set.archived) set.activeMatchIndex = 0;
   const activeIdx = set.activeMatchIndex||0;
@@ -3848,6 +3955,11 @@ function renderSet(set){
   const matchOver = matchWinnerIdx !== null;
 
   const S = summarize(set);
+  return {set,activeIdx,m,customSides,gIdx,throwsList,currentMatchRes,curDone,matchWinnerIdx,matchOver,S};
+}
+
+function renderSetSettings(context){
+  const {set,S}=context;
   $("delete-unstarted-set").classList.toggle("hide",!currentPlayer||!canEditSetMembers(set));
   $("delete-unstarted-set").disabled=deleteSetBusy;
   renderSetMemberEditor(set);
@@ -3859,6 +3971,10 @@ function renderSet(set){
   $("timer-reset-btn").disabled=!!set.archived;
   $("undo").disabled=!!set.archived;
   
+}
+
+function renderSetHeading(context){
+  const {set,activeIdx,m,customSides,gIdx,S}=context;
   $("setname").textContent=set.name;
   let stageName = `【第${activeIdx+1}試合】`;
   if(set.sides.length === 3) {
@@ -3896,8 +4012,8 @@ function renderSet(set){
   const totalGames = m.tournamentMode === "match2_total" ? 2 : (parseInt(m.gamesToPlay, 10) || 1);
   const modeLabel = (m.tournamentMode === "match_total" || m.tournamentMode === "match2_total") ? ` (${totalGames}ゲーム合計 ${gIdx < totalGames ? `ゲーム${gIdx+1}/${totalGames}` : "同点決着ゲーム"})` : m.tournamentMode === "game2_wins" ? ` (最大${customSides.length+1}ゲーム・2本先取)` : ` (1本勝負)`;
   $("setinfo").textContent=isTournamentSet(set.type) ? `トーナメント戦 ${set.consolationEnabled===false?"（交流戦なし）":"（交流戦あり）"}${stageName}${modeLabel}` : isLeagueSet(set.type) ? `${m.blockName ? `${m.blockName}・` : ""}${m.leaguePlayoff ? "優勝決定プレーオフ" : `総当たりリーグ戦 【第${activeIdx+1}試合】`}${m.tournamentMode === "match_total" ? modeLabel : ""}` : ordinaryProgressText(set,m);
-  $("final").innerHTML=(set.archived?`<div class="banner">中断保存済み（セット勝敗なし）</div><p class="pl">決着済みゲームのみ通算成績へ反映しています。途中の記録は閲覧用に保持しています。</p>`:S.over ? `<div class="banner">🏆 ${S.winnerNames && S.winnerNames.length ? `セット優勝：${S.winnerNames.map(name => esc(name)).join("・")}` : "セットの全日程が終了しました！"}</div>`:"" )+
-    (S.over&&!set.archived&&isLeagueSet(set.type)?renderLeaguePlayoffPanel(set):"");
+  setHTMLIfChanged($("final"),(set.archived?`<div class="banner">中断保存済み（セット勝敗なし）</div><p class="pl">決着済みゲームのみ通算成績へ反映しています。途中の記録は閲覧用に保持しています。</p>`:S.over ? `<div class="banner">🏆 ${S.winnerNames && S.winnerNames.length ? `セット優勝：${S.winnerNames.map(name => esc(name)).join("・")}` : "セットの全日程が終了しました！"}</div>`:"" )+
+    (S.over&&!set.archived&&isLeagueSet(set.type)?renderLeaguePlayoffPanel(set):""));
   const createPlayoffButton=$("create-league-playoff");
   if(createPlayoffButton)createPlayoffButton.onclick=()=>createLeaguePlayoff(set.id);
   const openPlayoffButton=$("open-league-playoff");
@@ -3909,9 +4025,16 @@ function renderSet(set){
   const playoffModeSelect=$("league-playoff-mode");
   if(playoffModeSelect){const sync=()=>$("league-playoff-game-first-box").classList.toggle("hide",playoffModeSelect.value==="game1");playoffModeSelect.onchange=sync;sync();}
   
+}
+
+function renderSetSchedule(context){
+  const {set,activeIdx,S}=context;
   if(isTournamentSet(set.type) || isLeagueSet(set.type)) {
     $("tournament-overview").classList.remove("hide");
     $("tournament-overview-title").textContent = isLeagueSet(set.type) ? "📋 リーグ戦 / 対戦スケジュール" : "🌳 トーナメント表 / 対戦スケジュール";
+    $("tournament-tree-content").style.display=isScheduleHidden?"none":"block";
+    $("toggle-tournament-overview").textContent=isScheduleHidden?"展開する":"折りたたむ";
+    if(isScheduleHidden)return;
     let treeHtml = `<ul>` + set.matches.map((mt, idx) => {
       const mw = getMatchWinner(mt, set.missRule, set.overRule, isTeamSet(set.type));
       const isDone = mw !== null;
@@ -4000,13 +4123,17 @@ function renderSet(set){
         block.standings.map(row=>`<tr><td>${row.rank}</td><td>${sideLabel(set,{name:row.name})}</td><td>${row.matchesPlayed}</td><td>${row.wins}</td><td>${row.pointsFor}</td><td>${row.pointsAgainst}</td><td>${row.differential}</td><td>${row.headToHeadWins}</td></tr>`).join("")+`</table>`).join("");
     }
     if(set.tournamentBracketVersion===2)treeHtml=renderPowerTournamentBracket(set)+"<h4>対戦スケジュール</h4>"+treeHtml;
-    $("tournament-tree-content").innerHTML = treeHtml;
+    setHTMLIfChanged($("tournament-tree-content"),treeHtml);
     $("tournament-tree-content").style.display = isScheduleHidden ? "none" : "block";
     $("toggle-tournament-overview").textContent = isScheduleHidden ? "展開する" : "折りたたむ";
   } else {
     $("tournament-overview").classList.add("hide");
   }
 
+}
+
+function renderSetScoreboard(context){
+  const {set,activeIdx,m,customSides,gIdx,currentMatchRes,curDone,S}=context;
   const scoreKey = side => scoreSideKey(side, set.type);
   const previousScores = new Map(), totalScores = new Map();
   for(let matchIndex = 0; matchIndex <= activeIdx; matchIndex++) {
@@ -4054,10 +4181,21 @@ function renderSet(set){
     return `<div class="card ${cls}" style="${cardStyle}"><div class="score-side-details">${sideTitle}${teamZeroStreak}<div class="pl">${pl}</div></div> <div class="score">${stSide.score}<small>今回のゲーム</small><small>${previousLabel} ${previous}</small><small>合計 ${total}点</small></div></div>`;
   }).join(""));
 
+}
+
+function renderSetOrder(context){
+  const {set}=context;
   // 個人戦・トーナメント・リーグでもオーダー/先攻後攻の並び替えパネルを表示する
   renderNextOrderForm(set);
 
-  if(selectedThrow&&(selectedThrow.sid!==set.id||selectedThrow.mi!==activeIdx||selectedThrow.gi!==gIdx||selectedThrow.snapshot!==JSON.stringify(throwsList)))selectedThrow=null;
+}
+
+function renderSetInput(context){
+  const {set,activeIdx,m,customSides,gIdx,throwsList,currentMatchRes,curDone,matchWinnerIdx,matchOver,S}=context;
+  if(selectedThrow&&(selectedThrow.sid!==set.id||selectedThrow.mi!==activeIdx||selectedThrow.gi!==gIdx||selectedThrow.snapshot!==JSON.stringify(throwsList))){
+    if(selectedThrow.sid===set.id&&selectedThrow.mi===activeIdx&&selectedThrow.gi===gIdx)scoreSaveMessage="投球履歴が更新されたため、修正対象の選択を解除しました。最新の記録から選び直してください。";
+    selectedThrow=null;
+  }
   $("edit-throw-status").textContent=selectedThrow?`第${selectedThrow.index+1}投（${throwsList[selectedThrow.index]}点）を選択中。点数ボタンで修正`:"";
   const myTurn = selectedThrow?correctionAllowed(data,set,m,selectedThrow.index):isMyTurn();
   $("pad").style.display = myTurn ? "contents" : "none";
@@ -4076,25 +4214,66 @@ function renderSet(set){
   $("next").classList.toggle("hide", !curDone || S.over);
   $("next").textContent = matchOver ? "次の対戦（次の試合）へ進む" : "次のゲームへ進む";
 
+}
+
+function renderSetResults(context){
+  const {set}=context;
   const resultsHtml=`<table><tr>${set.type==="solo"||set.type==="league"?"<th>ブロック</th><th>試合</th>":"<th>試合</th>"}<th>ゲーム</th><th>先攻</th><th>対戦・得点</th><th>勝者</th></tr>`+
     getResultsBodyHTML(set)+"</table>";
   setHTMLIfChanged($("results"),resultsHtml);
 
+}
+
+function renderSetThrowLog(context){
+  const {set,m,gIdx,throwsList}=context;
   setHTMLIfChanged($("log"),getThrowLogHTML(set,m,gIdx,throwsList,selectedThrow?.index));
-  updateScoreSaveUI();
-  startTimer();
+}
+
+const setSectionCache=new Map();
+let setSectionScreen="";
+function renderSectionIfChanged(name,key,action){
+  if(setSectionCache.get(name)===key)return;
+  measureRenderSection(name,action);
+  // Never cache a failed render.
+  setSectionCache.set(name,key);
+}
+function setStructureForRender(set){
+  return {...set,matches:set.matches.map(match=>Object.fromEntries(Object.entries(match).filter(([key])=>key!=="throws"&&!/^game\d+$/.test(key))))};
+}
+function renderSet(set){
+  return measureRenderSection("set.total",()=>{
+    const screen=JSON.stringify([room,view,set.id]);
+    if(screen!==setSectionScreen){setSectionScreen=screen;setSectionCache.clear();}
+    const context=measureRenderSection("set.context",()=>createSetRenderContext(set));
+    const setKey=JSON.stringify(set);
+    const headingKey=JSON.stringify([setStructureForRender(set),context.S.over,context.S.winnerNames,currentPlayer,isAdmin(),data.sets.map(item=>[item.id,item.name,item.sourceLeagueSetId])]);
+    // Permissions and editor drafts are local state: always reconcile these guards.
+    measureRenderSection("renderSetSettings",()=>renderSetSettings(context));
+    renderSectionIfChanged("renderSetHeading",headingKey,()=>renderSetHeading(context));
+    renderSectionIfChanged("renderSetSchedule",JSON.stringify([setKey,isScheduleHidden]),()=>renderSetSchedule(context));
+    renderSectionIfChanged("renderSetScoreboard",setKey,()=>renderSetScoreboard(context));
+    measureRenderSection("renderSetOrder",()=>renderSetOrder(context));
+    measureRenderSection("renderSetInput",()=>renderSetInput(context));
+    renderSectionIfChanged("renderSetResults",setKey,()=>renderSetResults(context));
+    measureRenderSection("renderSetThrowLog",()=>renderSetThrowLog(context));
+    updateScoreSaveUI();
+    startTimer();
+  });
 }
 
 function renderStats(){
+  return measureRenderSection("stats.total",renderStatsContent);
+}
+function renderStatsContent(){
   stopTimer();
   updateSimpleHistoryControls();
   refreshHistorySetList();
 
   $("stats-room-info").textContent=`部屋コード：${room||"不明"} ／ 日付：${roomCreatedDate(data)}（部屋作成日）`;
   const T=tally(data);
-  $("stats").innerHTML="<table><tr><th class='l'>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th><th>0点率</th></tr>"+
+  setHTMLIfChanged($("stats"),"<table><tr><th class='l'>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th><th>0点率</th></tr>"+
     T.map(t=>`<tr><td class="l">${esc(t.name)}</td><td>${t.played}</td><td>${t.win}</td><td>${t.played?Math.round(t.win/t.played*100)+"%":"-"}</td><td>${t.setWin}</td><td>${t.n}</td><td>${t.pts}</td><td>${t.n?(t.pts/t.n).toFixed(1):"-"}</td><td>${t.zero}</td><td>${t.n?(t.zero/t.n*100).toFixed(1)+"%":"-"}</td></tr>`).join("")+"</table>"+
-    "<p class='pl'>「ゲーム数」は決着したゲームの参加数、「勝」はそのうち勝利したゲーム数です。中断保存したセットは決着済みゲームだけを集計し、セット優勝には加算しません。総得点は集計対象の投球で獲得した得点の合計、平均点は1投あたりの得点です。0点率は0点回数÷投球数の割合です。</p>";
+    "<p class='pl'>「ゲーム数」は決着したゲームの参加数、「勝」はそのうち勝利したゲーム数です。中断保存したセットは決着済みゲームだけを集計し、セット優勝には加算しません。総得点は集計対象の投球で獲得した得点の合計、平均点は1投あたりの得点です。0点率は0点回数÷投球数の割合です。</p>");
 
 }
 let historyRenderError="",historyLeaving=false;
