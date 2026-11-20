@@ -76,7 +76,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.89</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.90</span></h1>
 <p id="app-lock-status" class="pl" role="status" hidden></p>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
@@ -92,8 +92,7 @@ td.l,th.l{text-align:left}
 <p class="pl">固定8名は名前変更・削除できません。追加メンバーは編集できます。候補一覧と参加チェックはこの端末・ブラウザーに自動保存します。</p>
 <div id="home-members-status" class="pl" role="status" aria-live="polite"></div>
 <div id="home-players-container" style="margin:8px 0; display:flex; flex-wrap:wrap; gap:8px;"></div>
-<p class="pl">追加候補の最終利用をこの端末で記録します。自動削除はしません。</p>
-<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><select id="home-cleanup-days" style="width:auto"><option value="90">90日以上未利用</option><option value="180">180日以上未利用</option><option value="365">365日以上未利用</option></select><button type="button" id="home-cleanup" class="sub">未使用の追加候補を整理</button></div>
+
 <div style="display:flex; gap:6px; margin-top:8px;">
 <input id="new-home-member" type="text" placeholder="新しいメンバーの名前" style="margin:0;">
 <button type="button" class="sub" id="add-home-member" style="font-size:14px; padding:6px 12px;">追加</button>
@@ -102,6 +101,8 @@ td.l,th.l{text-align:left}
 <input id="new-room-pass" type="password" inputmode="numeric" maxlength="4" placeholder="例: 1234" style="margin-top:4px;">
 </label>
 <p style="margin-top:12px;"><button id="create">チェックしたメンバーで部屋を作る</button></p>
+<p class="pl">追加候補の最終利用をこの端末で記録します。自動削除はしません。</p>
+<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><select id="home-cleanup-days" style="width:auto"><option value="90">90日以上未利用</option><option value="180">180日以上未利用</option><option value="365">365日以上未利用</option></select><button type="button" id="home-cleanup" class="sub">未使用の追加候補を整理</button></div>
 </details>
 </div>
 <div id="game" class="hide">
