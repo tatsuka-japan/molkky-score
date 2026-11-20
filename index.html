@@ -76,12 +76,18 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.87</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.89</span></h1>
 <p id="app-lock-status" class="pl" role="status" hidden></p>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
-<b>今日の部屋を作る</b>
+<b>部屋に参加する</b>
+<input id="code" type="text" inputmode="numeric" maxlength="4" placeholder="4桁の部屋コード">
+<input id="join-pass" type="password" inputmode="numeric" maxlength="4" placeholder="パスワード（設定されている場合）">
+<p><button id="join">参加する</button></p>
+</div>
+<details class="card">
+<summary>今日の部屋を作る</summary>
 <p class="pl">参加するメンバーにチェックを入れてください。新しいメンバーを追加することもできます。</p>
 <p class="pl">固定8名は名前変更・削除できません。追加メンバーは編集できます。候補一覧と参加チェックはこの端末・ブラウザーに自動保存します。</p>
 <div id="home-members-status" class="pl" role="status" aria-live="polite"></div>
@@ -96,13 +102,7 @@ td.l,th.l{text-align:left}
 <input id="new-room-pass" type="password" inputmode="numeric" maxlength="4" placeholder="例: 1234" style="margin-top:4px;">
 </label>
 <p style="margin-top:12px;"><button id="create">チェックしたメンバーで部屋を作る</button></p>
-</div>
-<div class="card">
-<b>部屋に参加する</b>
-<input id="code" type="text" inputmode="numeric" maxlength="4" placeholder="4桁の部屋コード">
-<input id="join-pass" type="password" inputmode="numeric" maxlength="4" placeholder="パスワード（設定されている場合）">
-<p><button id="join">参加する</button></p>
-</div>
+</details>
 </div>
 <div id="game" class="hide">
 <div id="room-sync-panel" class="card hide" role="status" aria-live="polite"><span id="room-sync-message"></span> <button type="button" id="reconnect-room" class="sub">再接続</button></div>
