@@ -76,7 +76,8 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.84</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.87</span></h1>
+<p id="app-lock-status" class="pl" role="status" hidden></p>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
@@ -133,22 +134,9 @@ td.l,th.l{text-align:left}
 <label style="margin-top:8px;">チーム数 
 <select id="teamcount" style="margin-top:4px;">
 <option value="2">2チーム</option>
-<option value="3">3チーム</option>
-<option value="4">4チーム</option>
-<option value="5">5チーム</option>
-<option value="6">6チーム</option>
-<option value="7">7チーム</option>
-<option value="8">8チーム</option>
-<option value="9">9チーム</option>
-<option value="10">10チーム</option>
-<option value="11">11チーム</option>
-<option value="12">12チーム</option>
-<option value="13">13チーム</option>
-<option value="14">14チーム</option>
-<option value="15">15チーム</option>
-<option value="16">16チーム</option>
 </select>
 </label>
+<p id="teamcount-status" class="pl" role="status"></p>
 <button type="button" class="sub" id="random-team-assign" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにチーム分け</button>
 <div style="background:#faf8f5; border:1px dashed #ccc; padding:8px; border-radius:8px; margin:8px 0;">
 <b>👥 名前不明の対戦相手（匿名チーム）を追加</b>
@@ -308,16 +296,49 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <script>
-function unlock() {
-  const APP_PASSWORD = "12345";
-  if (document.getElementById("password").value === APP_PASSWORD) {
-    document.getElementById("lock").hidden = true;
-    document.getElementById("content").hidden = false;
-  } else {
-    document.getElementById("error").textContent = "パスワードが違います";
+const APP_UNLOCK_SESSION_KEY="molkky:app-unlocked:v1";
+function showUnlockedApp(){
+  document.getElementById("lock").hidden=true;
+  document.getElementById("content").hidden=false;
+  document.getElementById("error").textContent="";
+  document.getElementById("password").value="";
+}
+function readAppUnlock(storageName){
+  try{return globalThis[storageName].getItem(APP_UNLOCK_SESSION_KEY)==="verified";}catch(error){return false;}
+}
+function saveAppUnlock(storageName){
+  try{
+    globalThis[storageName].setItem(APP_UNLOCK_SESSION_KEY,"verified");
+    return globalThis[storageName].getItem(APP_UNLOCK_SESSION_KEY)==="verified";
+  }catch(error){return false;}
+}
+function restoreAppUnlock(){
+  const persistent=readAppUnlock("localStorage");
+  if(persistent||readAppUnlock("sessionStorage")){
+    showUnlockedApp();
+    // v2.85のタブ内認証だけが残っている場合も、端末保存へ引き継ぐ。
+    if(!persistent)rememberAppUnlock();
+    return true;
   }
   return false;
 }
+function rememberAppUnlock(){
+  const persistent=saveAppUnlock("localStorage"),tab=saveAppUnlock("sessionStorage");
+  const status=document.getElementById("app-lock-status");
+  status.hidden=persistent;
+  status.textContent=persistent?"":tab?"このブラウザーでは端末への保存が許可されていません。このタブ内では解除を保持しますが、開き直すと再入力が必要な場合があります。":"このブラウザーではロック解除状態を保持できません。ブラウザーの保存設定をご確認ください。";
+}
+function unlock(){
+  const APP_PASSWORD="12345";
+  if(document.getElementById("password").value===APP_PASSWORD){
+    showUnlockedApp();rememberAppUnlock();
+  }else{
+    document.getElementById("error").textContent="パスワードが違います";
+  }
+  return false;
+}
+// 入力パスワードは保存せず、この端末・ブラウザーに解除済みフラグを保持する。
+restoreAppUnlock();
 </script>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -946,7 +967,8 @@ $("ntype").onchange=()=>{
   $("nglabel").textContent = isLeagueSet(type)||isTournamentSet(type)?"ゲーム数":$("nmode").value === "first"?"何勝先取？":"ゲーム数";
   syncTournamentModeFromGeneralSettings();
   syncGameFirstRuleVisibility();
-  syncNewTournamentExchange();
+  if(!isTeamSet(type))$("mkset").disabled=false;
+  if(data&&isTeamSet(type))updateTeamCheckboxes({preserveSolo:true});else syncNewTournamentExchange();
 };
 $("ngames").addEventListener("change",()=>{syncTournamentModeFromGeneralSettings();syncGameFirstRuleVisibility();});
 $("ntournament-mode").onchange=()=>{ tournamentModeManuallySet = true;syncGameFirstRuleVisibility(); };
@@ -1850,6 +1872,7 @@ function prepareNewSetParticipants(){
       if(teamIndex<0||teamIndex>=count||used.has(teamIndex))teamIndex=Array.from({length:count},(_,i)=>i).find(i=>!used.has(i));
       used.add(teamIndex);side.players.forEach(name=>teamAssignments[count][name]=teamIndex);teamMemberOrder[count][teamIndex]=[...side.players];return teamIndex;
     });
+    $("teamcount").dataset.preferredCount=String(count);
     $("teamcount").value=String(count);
   }
   sig="";
@@ -1907,16 +1930,62 @@ function captureTeamFormState(count,busyMembers){
   
 }
 
-function updateTeamCheckboxes(){
+function teamCountLimits(busyMembers=getActiveMembersInOtherSets()){
+  const type=$("ntype").value,min=type==="team_league"||type==="team_tournament"?3:2;
+  const assignedSynthetic=new Set();
+  for(const [count,assignments] of Object.entries(teamAssignments))for(const [name,index] of Object.entries(assignments)){
+    if(Number.isInteger(index)&&index>=0&&index<Number(count))assignedSynthetic.add(name);
+  }
+  const available=[...new Set(data?.players||[])].filter(name=>!busyMembers.has(name)&&(!/^.+の\d+人目$/.test(name)||assignedSynthetic.has(name)));
+  const real=available.filter(name=>!/^.+の\d+人目$/.test(name));
+  return {min,max:Math.min(teamNamesDefault.length,available.length),available,real};
+}
+function syncTeamCountOptions(busyMembers){
+  const control=$("teamcount"),limits=teamCountLimits(busyMembers);
+  const requested=Number(control.dataset.preferredCount||control.value);
+  delete control.dataset.preferredCount;
+  const possible=limits.max>=limits.min;
+  const count=possible?Math.min(limits.max,Math.max(limits.min,Number.isInteger(requested)&&requested>=2?requested:limits.min)):limits.min;
+  const html=possible?Array.from({length:limits.max-limits.min+1},(_,i)=>`<option value="${i+limits.min}">${i+limits.min}チーム</option>`).join(""):'<option value="">参加可能人数が不足しています</option>';
+  setHTMLIfChanged(control,html);control.value=possible?String(count):"";control.disabled=!possible;
+  control.dataset.unavailable=possible?"0":"1";
+  const anonymous=limits.available.length-limits.real.length;
+  $("teamcount-status").textContent=possible?`参加可能：${limits.available.length}人${anonymous?`（匿名${anonymous}人を含む）`:""} ／ ${limits.min===limits.max?limits.min:`${limits.min}～${limits.max}`}チームを選択できます（1チーム1人以上）。`:`参加可能：${limits.available.length}人。${limits.min}チーム以上にするには、メンバーを追加してください。`;
+  if(possible&&Number.isInteger(requested)&&requested>=2&&requested!==count)$("teamcount-status").textContent+=` ${requested}→${count}チームに調整しました。割り当てをご確認ください。`;
+  $("random-team-assign").disabled=!possible||limits.real.length<count;
+  $("random-team-assign").title=limits.real.length<count?"ランダムに分ける実名メンバーが不足しています（匿名メンバーは対象外）。":"";
+  $("mkset").disabled=isTeamSet($("ntype").value)&&!possible;
+  return {...limits,count,requested,forced:!possible||!Number.isInteger(requested)||requested<limits.min||requested>limits.max};
+}
+function resizeTeamDraft(previousCount,count,available){
+  if(previousCount===count||!teamAssignments[previousCount])return;
+  const allowed=new Set(available),assignments=Object.create(null),orders=Object.create(null);
+  const counts=Array(count).fill(0);
+  for(let i=0;i<count;i++)orders[i]=[];
+  const oldOrder=teamOrder[previousCount]||Array.from({length:previousCount},(_,i)=>i);
+  const members=i=>[...new Set([...(teamMemberOrder[previousCount]?.[i]||[]),...Object.keys(teamAssignments[previousCount])])].filter(name=>allowed.has(name)&&teamAssignments[previousCount][name]===i);
+  for(const i of oldOrder.filter(i=>i<count))for(const name of members(i)){assignments[name]=i;orders[i].push(name);counts[i]++;}
+  for(const i of oldOrder.filter(i=>i>=count))for(const name of members(i)){
+    const target=counts.indexOf(Math.min(...counts));assignments[name]=target;orders[target].push(name);counts[target]++;
+  }
+  teamAssignments[count]=assignments;teamMemberOrder[count]=orders;
+  teamOrder[count]=[...new Set([...oldOrder.filter(i=>i<count),...Array.from({length:count},(_,i)=>i)])];
+}
+
+function updateTeamCheckboxes(options={}){
   if(!data) return;
   if(newSetParticipantDefaults){
     const boxes=[...document.querySelectorAll("#solo-containers .solo-item input[type=checkbox]")];
     boxes.forEach(box=>{if(box.checked)newSetParticipantDefaults.selected.add(box.value);else newSetParticipantDefaults.selected.delete(box.value);});
   }
-  const count = parseInt($("teamcount").value) || 2;
-  const players = data.players;
-  const busyMembers = getActiveMembersInOtherSets();
-  
+  const players=data.players,busyMembers=getActiveMembersInOtherSets();
+  const previousCount=document.querySelectorAll(".team-card").length;
+  if(previousCount>=2)captureTeamFormState(previousCount,busyMembers);
+  const known=new Set(players);
+  for(const assignments of Object.values(teamAssignments))for(const name of Object.keys(assignments))if(busyMembers.has(name)||!known.has(name))delete assignments[name];
+  const limits=syncTeamCountOptions(busyMembers),count=limits.count;
+  const sourceCount=previousCount>=2?previousCount:limits.requested;
+  if(limits.forced)resizeTeamDraft(sourceCount,count,limits.available);
   captureTeamFormState(count,busyMembers);
 
   busyMembers.forEach(name=>delete teamAssignments[count][name]);
@@ -1964,6 +2033,7 @@ function updateTeamCheckboxes(){
     descElem.textContent = `対戦相手の人数を指定してボタンを押すと、最後のチーム（${lastTeamName}）として「〇人目」を自動追加します。`;
   }
 
+  if(!options.preserveSolo){
   let soloHtml = `<div style="border:1px solid #ddd; padding:8px; border-radius:6px;" id="solo-group">` +
     players.map((n)=>{
       const isBusy = busyMembers.has(n);
@@ -1977,6 +2047,7 @@ function updateTeamCheckboxes(){
         `</div>`;
     }).join("") + `</div>`;
   $("solo-containers").innerHTML = soloHtml;
+  }
   syncNewTournamentExchange();
 }
 
@@ -1989,6 +2060,7 @@ function randomAssign(players,count){
 
 $("random-team-assign").onclick=()=>{
   if(!data)return;
+  if($("teamcount").disabled){alert("チーム分けできる参加者が不足しています。");return false;}
   const count=parseInt($("teamcount").value,10)||2;
   const busyMembers=getActiveMembersInOtherSets();
   const candidates=data.players.filter(name=>!busyMembers.has(name)&&!/^.+の\d+人目$/.test(name));
@@ -2014,7 +2086,8 @@ $("teamcount").onchange = () => {
 
 $("add-opponent-btn").onclick = () => {
   if(!data) return;
-  const count=Number($("teamcount").value);
+  const control=$("teamcount");
+  const count=control.disabled&&control.dataset.unavailable==="1"?teamCountLimits().min:Number(control.value);
   const size=Number($("opponent-size").value);
   if(!Number.isInteger(count)||count<2||count>teamNamesDefault.length){
     alert("チーム数は2〜16チームから選択してください。");return false;
