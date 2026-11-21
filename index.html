@@ -76,7 +76,7 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.90</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v2.91</span></h1>
 <p id="app-lock-status" class="pl" role="status" hidden></p>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
@@ -139,14 +139,14 @@ td.l,th.l{text-align:left}
 </label>
 <p id="teamcount-status" class="pl" role="status"></p>
 <button type="button" class="sub" id="random-team-assign" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにチーム分け</button>
-<div style="background:#faf8f5; border:1px dashed #ccc; padding:8px; border-radius:8px; margin:8px 0;">
-<b>👥 名前不明の対戦相手（匿名チーム）を追加</b>
+<details style="background:#faf8f5; border:1px dashed #ccc; padding:8px; border-radius:8px; margin:8px 0;">
+<summary>👥 名前不明の対戦相手（匿名チーム）を追加</summary>
 <p class="pl" style="margin:2px 0 6px 0;" id="opponent-desc">対戦相手の人数を指定してボタンを押すと、最後のチームとして「〇人目」を自動追加します。</p>
 <div style="display:flex; align-items:center; gap:8px;">
 <label style="margin:0; font-size:14px;">対戦相手の人数: <input id="opponent-size" type="number" min="1" max="10" value="2" style="width:70px; display:inline-block; margin:0; padding:4px;"></label>
 <button type="button" class="sub" id="add-opponent-btn" style="font-size:13px; padding:6px 12px; background:#2a9d3a;">＋ 匿名対戦チームをセット</button>
 </div>
-</div>
+</details>
 <p class="pl">各チームのメンバーを確認・調整してください。（[UP][DOWN]で順番変更可）</p>
 <div id="team-containers"></div>
 </div>
