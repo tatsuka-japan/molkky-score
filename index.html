@@ -61,6 +61,29 @@ td.l,th.l{text-align:left}
 .home-member-chip{display:inline-flex;flex-wrap:wrap;align-items:center;gap:5px;max-width:100%;padding:5px 7px;background:#eee;border-radius:7px}
 .home-member-chip label{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow-wrap:anywhere}
 .home-member-chip button{font-size:12px;padding:4px 6px;min-height:32px;flex-shrink:0}
+/* 全10項目とも見出し全体で開閉し、三角の形・色・余白を共通化。 */
+summary{list-style:none;cursor:pointer;}
+summary::-webkit-details-marker{display:none;}
+summary::marker{content:"";}
+summary.disclosure-summary{display:flex;align-items:center;gap:8px;min-height:28px;}
+summary.disclosure-summary::before{content:"";display:block;box-sizing:border-box;flex:0 0 16px;width:16px;height:8px;margin:0;padding:0;border:0;background:#333;clip-path:polygon(5px 0,11px 4px,5px 8px);transform-origin:8px 4px;}
+details[open]>summary.disclosure-summary::before{transform:rotate(90deg);}
+summary.disclosure-summary:focus-visible{outline:2px solid #3b6ea8;outline-offset:2px;}
+/* 文字の役割別ルール。得点・投球者・テンキーは専用の大きさを維持。 */
+:root{--text-body:16px;--text-heading:16px;--text-caption:13px;--text-action:16px;--text-compact:13px;--text-tab:14px;--text-title:20px;}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;font-size:var(--text-body);line-height:1.5;}
+button,input,select,textarea{font-family:inherit;}
+h1,h2{font-size:var(--text-title);font-weight:700;line-height:1.4;}
+summary.disclosure-summary,.card>b,.card>div>b,h4,#setname{font-size:var(--text-heading);font-weight:700;line-height:1.5;}
+summary.disclosure-summary b{font-size:inherit;font-weight:inherit;}
+h4{margin:12px 0 6px;}
+.pl,.score small{font-size:var(--text-caption);font-weight:400;line-height:1.5;}
+table{font-size:var(--text-caption);line-height:1.5;}
+textarea,input[type=text],input[type=number],input[type=password],input[type=date],select,label,.chk label{font-size:var(--text-body);}
+button,button.sub,button.go{font-size:var(--text-action);font-weight:600;line-height:1.4;}
+button.tab{font-size:var(--text-tab);font-weight:600;}
+button.compact-action,.home-member-chip button,.match-timer-box button.sub{font-size:var(--text-compact);font-weight:600;line-height:1.4;}
+.grid button,#pad button{font-size:22px;font-weight:600;}
 </style>
 </head>
 <body>
@@ -76,18 +99,18 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v2.93</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v3.00</span></h1>
 <p id="app-lock-status" class="pl" role="status" hidden></p>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
 <div class="card">
-<b>部屋に参加する</b>
+<b>🚪 部屋に参加する</b>
 <input id="code" type="text" inputmode="numeric" maxlength="4" placeholder="4桁の部屋コード">
 <input id="join-pass" type="password" inputmode="numeric" maxlength="4" placeholder="パスワード（設定されている場合）">
 <p><button id="join">参加する</button></p>
 </div>
 <details class="card">
-<summary>今日の部屋を作る</summary>
+<summary class="disclosure-summary">🏠 今日の部屋を作る</summary>
 <p class="pl">参加するメンバーにチェックを入れてください。新しいメンバーを追加することもできます。</p>
 <p class="pl">固定8名は名前変更・削除できません。追加メンバーは編集できます。候補一覧と参加チェックはこの端末・ブラウザーに自動保存します。</p>
 <div id="home-members-status" class="pl" role="status" aria-live="polite"></div>
@@ -95,7 +118,7 @@ td.l,th.l{text-align:left}
 
 <div style="display:flex; gap:6px; margin-top:8px;">
 <input id="new-home-member" type="text" placeholder="新しいメンバーの名前" style="margin:0;">
-<button type="button" class="sub" id="add-home-member" style="font-size:14px; padding:6px 12px;">追加</button>
+<button type="button" class="sub" id="add-home-member" style="padding:6px 12px;">追加</button>
 </div>
 <label style="margin-top:12px;">部屋のパスワード（4桁など・空欄でもOK）
 <input id="new-room-pass" type="password" inputmode="numeric" maxlength="4" placeholder="例: 1234" style="margin-top:4px;">
@@ -114,7 +137,7 @@ td.l,th.l{text-align:left}
 <span class="pl">自分は</span>
 <select id="me" style="width:auto"></select>
 <label style="margin-top:6px;"><input type="checkbox" id="restrict-my-turn" checked> 🔒 自分のチーム（または自分）の番のときだけ入力する</label>
-<details><summary>部屋の参加者を追加</summary><div><input id="addname" type="text" placeholder="参加者を追加" style="width:60%"> <button class="sub" id="addbtn">追加</button></div>
+<details><summary class="disclosure-summary">👥 部屋の参加者を追加</summary><div><input id="addname" type="text" placeholder="参加者を追加" style="width:60%"> <button class="sub" id="addbtn">追加</button></div>
 <div id="addname-status" class="pl" role="status" aria-live="polite"></div>
 </details>
 <button class="sub" id="leave" style="margin-top:6px">退出</button>
@@ -122,7 +145,7 @@ td.l,th.l{text-align:left}
 <div id="tabs"></div>
 <div id="v-new" class="hide">
 <div class="card">
-<b>新しいセットを作る</b><p class="pl">参加者は最後に作成したセットの保存済みメンバーを初期選択します。必要に応じて変更してください。団体戦同士ではチーム分けも引き継ぎます。未終了セットに参加中の人は選択できません。</p>
+<b>✨ 新しいセットを作る</b><p class="pl">参加者は最後に作成したセットの保存済みメンバーを初期選択します。必要に応じて変更してください。団体戦同士ではチーム分けも引き継ぎます。未終了セットに参加中の人は選択できません。</p>
 <label>種類 <select id="ntype">
 <option value="team">団体戦（チーム対抗）</option>
 <option value="team_league">団体戦（リーグ）</option>
@@ -138,13 +161,13 @@ td.l,th.l{text-align:left}
 </select>
 </label>
 <p id="teamcount-status" class="pl" role="status"></p>
-<button type="button" class="sub" id="random-team-assign" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにチーム分け</button>
+<button type="button" class="sub" id="random-team-assign" style="padding:6px 12px;background:#3b6ea8;">参加者をランダムにチーム分け</button>
 <details style="background:#faf8f5; border:1px dashed #ccc; padding:8px; border-radius:8px; margin:8px 0;">
-<summary>👥 名前不明の対戦相手（匿名チーム）を追加</summary>
+<summary class="disclosure-summary">👥 名前不明の対戦相手（匿名チーム）を追加</summary>
 <p class="pl" style="margin:2px 0 6px 0;" id="opponent-desc">対戦相手の人数を指定してボタンを押すと、最後のチームとして「〇人目」を自動追加します。</p>
 <div style="display:flex; align-items:center; gap:8px;">
-<label style="margin:0; font-size:14px;">対戦相手の人数: <input id="opponent-size" type="number" min="1" max="10" value="2" style="width:70px; display:inline-block; margin:0; padding:4px;"></label>
-<button type="button" class="sub" id="add-opponent-btn" style="font-size:13px; padding:6px 12px; background:#2a9d3a;">＋ 匿名対戦チームをセット</button>
+<label style="margin:0; ">対戦相手の人数: <input id="opponent-size" type="number" min="1" max="10" value="2" style="width:70px; display:inline-block; margin:0; padding:4px;"></label>
+<button type="button" class="sub" id="add-opponent-btn" style="padding:6px 12px; background:#2a9d3a;">＋ 匿名対戦チームをセット</button>
 </div>
 </details>
 <p class="pl">各チームのメンバーを確認・調整してください。（[UP][DOWN]で順番変更可）</p>
@@ -155,7 +178,7 @@ td.l,th.l{text-align:left}
 <div id="solo-containers"></div>
 </div>
 <details id="new-set-settings" style="margin-top:12px;">
-<summary>セットの設定（ゲーム数・対戦ルール）</summary>
+<summary class="disclosure-summary">⚙️ セットの設定（ゲーム数・対戦ルール）</summary>
 <div id="n-mode-box">
 <label>セットの勝ち方 <select id="nmode">
 <option value="fixed">① ゲーム数を決める（勝利数が多いサイドの勝ち）</option>
@@ -214,30 +237,27 @@ td.l,th.l{text-align:left}
 </div>
 </div>
 <div id="final"></div>
-<div id="solo-block-card" class="card hide" style="background:#eef4fb;">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="block-config-title">ブロック設定</b><button type="button" class="sub" id="toggle-block-config" style="font-size:12px;padding:4px 8px;">折りたたむ</button></div>
+<details id="solo-block-card" class="card hide" style="background:#eef4fb;" open>
+<summary class="disclosure-summary" id="toggle-block-config" aria-expanded="true"><b id="block-config-title">🧩 ブロック設定</b></summary>
 <div id="block-config-content">
 <p class="pl" id="block-config-desc">参加者を1～3ブロックに分けます。試合開始前に設定してください。</p>
 <label>ブロック数 <select id="solo-block-count"><option value="1">1ブロック</option><option value="2">2ブロック</option><option value="3">3ブロック</option></select></label>
-<button type="button" class="sub" id="random-solo-blocks" style="font-size:14px;padding:6px 12px;background:#3b6ea8;">参加者をランダムにブロック分け</button>
+<button type="button" class="sub" id="random-solo-blocks" style="padding:6px 12px;background:#3b6ea8;">参加者をランダムにブロック分け</button>
 <div id="solo-block-assignments"></div>
 <button type="button" class="sub" id="save-solo-blocks">ブロック設定を保存</button>
 <button type="button" class="sub" id="reset-block-draft">保存済み設定に戻す</button>
 </div>
 <span id="solo-block-status" class="pl" role="status" aria-live="polite"></span>
-</div>
-<div class="card" id="match-order-card" style="background:#faf8f5; border:1px dashed #ccc; padding:8px; margin-bottom:10px; border-radius:8px;">
-<div style="display:flex; justify-content:space-between; align-items:center;">
-<b>📝 対戦オーダー・投げる順番（先攻・後攻）調整</b>
-<button type="button" class="sub" id="toggle-order-edit-btn" style="font-size:12px; padding:4px 8px;">折りたたむ</button>
-</div>
+</details>
+<details class="card" id="match-order-card" style="background:#faf8f5; border:1px dashed #ccc; padding:8px; margin-bottom:10px; border-radius:8px;" open>
+<summary class="disclosure-summary" id="toggle-order-edit-btn" aria-expanded="true"><b>📝 対戦オーダー・投げる順番（先攻・後攻）調整</b></summary>
 <div id="order-edit-content">
 <p class="pl" id="order-edit-desc">試合開始前または次の試合へ進む前に、各サイドの並び順（先攻・後攻）やチーム内オーダーを変更できます。</p>
 <div id="next-order-container"></div>
-<p style="margin-top:8px;" id="order-save-area"><button class="sub" id="save-order" style="font-size:14px; padding:6px 12px; background:#2a9d3a;">順番を保存（次もこの並びを基準に先攻条件を適用）</button></p>
+<p style="margin-top:8px;" id="order-save-area"><button class="sub" id="save-order" style="padding:6px 12px; background:#2a9d3a;">順番を保存（次もこの並びを基準に先攻条件を適用）</button></p>
 <div id="order-save-status" class="pl" role="status" aria-live="polite"></div>
 </div>
-</div>
+</details>
 <div id="board"></div>
 <div id="pad-area">
 <div class="card">
@@ -262,15 +282,15 @@ td.l,th.l{text-align:left}
 <div class="card" id="input-lock-msg" style="color:#c33;font-weight:bold;text-align:center;display:none;">
 🔒 現在はあなたのチーム（またはあなた）の番ではないため、スコア入力できません
 </div>
-<div class="card"><b>この試合の投球履歴</b><div id="log" class="pl"></div></div>
-<div class="card"><b>試合結果</b><div id="results"></div></div>
-<div id="tournament-overview" class="card hide" style="background:#faf8f5;">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b id="tournament-overview-title">🌳 トーナメント表 / 対戦スケジュール</b><button type="button" class="sub" id="toggle-tournament-overview" style="font-size:12px;padding:4px 8px;">展開する</button></div>
+<div class="card"><b>📜 この試合の投球履歴</b><div id="log" class="pl"></div></div>
+<div class="card"><b>📋 試合結果</b><div id="results"></div></div>
+<details id="tournament-overview" class="card hide" style="background:#faf8f5;">
+<summary class="disclosure-summary" id="toggle-tournament-overview" aria-expanded="false"><b id="tournament-overview-title">🌳 トーナメント表 / 対戦スケジュール</b></summary>
 <div id="tournament-tree-content" style="display:none;"></div>
-</div>
-<details id="set-members-card" class="card"><summary>セットの参加者を追加・削除</summary><p class="pl">最初の投球前のみ変更できます。リーグ由来の決勝トーナメントでは元リーグ情報・先攻条件を維持し、新しく追加した人・チームは既存の順位の後に順位を付けます。保存すると対戦表・ブロック設定・投球順の調整を作り直します。参加する人にチェックを入れてください。団体戦は所属チームも選択してください。チェックを外すだけでは部屋の参加者・過去成績は残ります。固定8人以外の「削除」は、未終了セットに参加していない人を部屋の一覧から削除します（過去成績・ホーム候補は保持）。</p><div id="set-members-editor"></div><input id="set-member-name" placeholder="新しい参加者名"><button type="button" class="sub" id="set-member-add">候補に追加</button><p><button type="button" id="set-members-save">参加者を保存</button></p><div id="set-members-status" class="pl" role="status"></div></details>
+</details>
+<details id="set-members-card" class="card"><summary class="disclosure-summary">👥 セットの参加者を追加・削除</summary><p class="pl">最初の投球前のみ変更できます。リーグ由来の決勝トーナメントでは元リーグ情報・先攻条件を維持し、新しく追加した人・チームは既存の順位の後に順位を付けます。保存すると対戦表・ブロック設定・投球順の調整を作り直します。参加する人にチェックを入れてください。団体戦は所属チームも選択してください。チェックを外すだけでは部屋の参加者・過去成績は残ります。固定8人以外の「削除」は、未終了セットに参加していない人を部屋の一覧から削除します（過去成績・ホーム候補は保持）。</p><div id="set-members-editor"></div><input id="set-member-name" placeholder="新しい参加者名"><button type="button" class="sub" id="set-member-add">候補に追加</button><p><button type="button" id="set-members-save">参加者を保存</button></p><div id="set-members-status" class="pl" role="status"></div></details>
 <details id="future-games-card" class="card hide" style="background:#eef4fb;">
-<summary style="font-weight:bold;cursor:pointer;">管理者：予定ゲーム数・対戦方式の変更</summary>
+<summary class="disclosure-summary" style="font-weight:bold;cursor:pointer;">🛠️ 管理者：予定ゲーム数・対戦方式の変更</summary>
 <p class="pl">入力済みの記録と確定済みの勝者は保持します。</p>
 <label id="future-games-mode-box">今後の対戦方式 <select id="future-games-mode"><option value="game1">1本勝負</option><option value="game2_wins">2本先取</option><option value="match_total">合計得点</option></select></label>
 <label id="future-games-number-box"><span id="future-games-number-label">ゲーム数</span> <input id="future-games-count" type="number" min="1" max="99" value="1" style="width:80px;"></label>
@@ -281,13 +301,13 @@ td.l,th.l{text-align:left}
 </details>
 </div>
 <div id="v-stats" class="hide">
-<div class="card"><b>セット一覧</b><div id="setlist"></div></div>
-<div class="card"><b>この部屋の通算成績</b>
+<div class="card"><b>🗂️ セット一覧</b><div id="setlist"></div></div>
+<div class="card"><b>📊 この部屋の通算成績</b>
 <div id="stats-room-info" class="pl"></div>
 <div id="stats"></div>
 <p><button class="sub" id="copystats">表をコピー（Excelに貼り付け用）</button></p>
 </div>
-<div class="card"><details id="simple-history-panel"><summary><b>保存した記録・生涯成績</b></summary>
+<div class="card"><details id="simple-history-panel"><summary class="disclosure-summary"><b>💾 保存した記録・生涯成績</b></summary>
 <p class="pl">自動保存ではありません。終了・中断保存したセットを管理者が保存します。訂正後も保存・更新が必要です。部屋を削除する前に保存完了を確認してください。</p>
 <p><label>この部屋の開催日 <input type="date" id="history-day"></label> <label><input type="checkbox" id="history-change-day">保存済みの開催日を変更</label> <button id="history-save" class="sub">終了セットを保存・更新（管理者）</button></p>
 <p id="history-targets" class="pl"></p><p id="history-last-saved" class="pl" role="status"></p><p id="history-status" role="status"></p>
@@ -1557,9 +1577,9 @@ function rememberLeagueConsolationChoice(event){
 $("v-set").addEventListener("change",rememberLeagueConsolationChoice);
 function renderLeaguePlayoffPanel(set){
   const existing=data.sets.find(item=>item.sourceLeagueSetId===set.id);
-  if(existing)return `<div class="card" style="border:1px solid #2a9d3a;"><b>決勝トーナメント作成済み</b><p class="pl">${esc(existing.name)}として作成されています。</p><button type="button" id="open-league-playoff">決勝トーナメントを開く</button></div>`;
+  if(existing)return `<div class="card" style="border:1px solid #2a9d3a;"><b>🏆 決勝トーナメント作成済み</b><p class="pl">${esc(existing.name)}として作成されています。</p><button type="button" id="open-league-playoff">決勝トーナメントを開く</button></div>`;
   const total=set.sides.length;
-  if(total<3)return `<div class="card"><b>決勝トーナメント</b><p class="pl">進出人数が3人・チーム以上になった場合に作成できます。</p></div>`;
+  if(total<3)return `<div class="card"><b>🏆 決勝トーナメント</b><p class="pl">進出人数が3人・チーム以上になった場合に作成できます。</p></div>`;
   const countChoice=leagueQualifierChoices.get(JSON.stringify([room,set.id]))||(total<=16?"all":"16");
   const options=[];
   for(let count=3;count<=Math.min(total,16);count++)options.push(`<option value="${count}" ${String(count)===countChoice?"selected":""}>上位${count}人・チーム</option>`);
@@ -1705,7 +1725,7 @@ function renderPowerTournamentBracket(set){
     nodes=next;
   }
   const extras=set.matches.filter(match=>["bronze","consolation","placement","loser_round1","loser_round2"].includes(match.bracket));
-  return `<h4>優勝トーナメント（${size}枠・不戦勝${size-set.sides.length}）</h4><div style="overflow-x:auto"><svg role="img" aria-label="優勝トーナメント表" viewBox="0 0 ${width} ${height}" style="display:block;width:${width}px;max-width:none;height:${height}px">${svg}</svg></div>`+extras.map(match=>`<div class="card"><b>${esc(getNewTournamentLabel(set,match))}</b><div>${(match.customSides||match.sides).map((side,slot)=>side?esc(sideDisplayName(set,side)):esc(getTournamentSlotLabel(set,match,slot))).join(" vs ")}</div></div>`).join("");
+  return `<h4>🏆 優勝トーナメント（${size}枠・不戦勝${size-set.sides.length}）</h4><div style="overflow-x:auto"><svg role="img" aria-label="優勝トーナメント表" viewBox="0 0 ${width} ${height}" style="display:block;width:${width}px;max-width:none;height:${height}px">${svg}</svg></div>`+extras.map(match=>`<div class="card"><b>${esc(getNewTournamentLabel(set,match))}</b><div>${(match.customSides||match.sides).map((side,slot)=>side?esc(sideDisplayName(set,side)):esc(getTournamentSlotLabel(set,match,slot))).join(" vs ")}</div></div>`).join("");
 }
 
 function getThreePlayerTournamentStandings(set){
@@ -2008,8 +2028,8 @@ function updateTeamCheckboxes(options={}){
     html += `<div style="margin-bottom:8px; border:1px solid #ddd; padding:8px; border-radius:6px; background:${teamCardColor(teamName)};" class="team-card" data-index="${i}">
       <b>${teamName}</b>
       <span style="float:right;display:inline-flex;gap:4px;">
-        <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeam(${i}, 'up')">[UP]</button>
-        <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeam(${i}, 'down')">[DOWN]</button>
+        <button type="button" class="sub compact-action" style="padding:2px 6px;" onclick="window.sortTeam(${i}, 'up')">[UP]</button>
+        <button type="button" class="sub compact-action" style="padding:2px 6px;" onclick="window.sortTeam(${i}, 'down')">[DOWN]</button>
       </span>
       <div class="chk team-chk-group" style="margin-top:6px;">` +
       orderedPlayers.map(n => {
@@ -2018,11 +2038,11 @@ function updateTeamCheckboxes(options={}){
         if(isBusy) return '';
         return `<label style="display:${isHere ? 'flex' : 'none'}; justify-content:space-between; align-items:center; margin:4px 0;" class="team-member-item" data-name="${esc(n)}">
           <div><input type="checkbox" value="${esc(n)}" ${isHere?"checked":""} onchange="window.handleTeamCheckboxChange(this, ${count})"> 👤${esc(n)}</div>
-          <div><button type="button" class="sub" style="font-size:11px;padding:1px 5px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
-          <button type="button" class="sub" style="font-size:11px;padding:1px 5px;margin-left:2px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button></div>
+          <div><button type="button" class="sub compact-action" style="padding:1px 5px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
+          <button type="button" class="sub compact-action" style="padding:1px 5px;margin-left:2px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button></div>
         </label>`;
       }).join("") + `</div>
-      <div style="margin-top:6px;"><select onchange="window.addMemberToTeam(${i}, this, ${count})" style="font-size:13px;padding:4px;"><option value="">＋ メンバーを追加</option>` +
+      <div style="margin-top:6px;"><select onchange="window.addMemberToTeam(${i}, this, ${count})" style="padding:4px;"><option value="">＋ メンバーを追加</option>` +
       players.map(n => {
         if(assignedMembers.has(n) || busyMembers.has(n)) return '';
         return `<option value="${esc(n)}">${esc(n)}</option>`;
@@ -2046,8 +2066,8 @@ function updateTeamCheckboxes(options={}){
       }
       return `<div style="display:flex; justify-content:space-between; align-items:center; margin:4px 0;" class="solo-item">` +
         `<label style="margin:0;"><input type="checkbox" value="${esc(n)}" ${!newSetParticipantDefaults||newSetParticipantDefaults.selected.has(n)?"checked":""}> ${esc(n)}</label>` +
-        `<div><button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortSolo(this, 'up')">[UP]</button>` +
-        `<button type="button" class="sub" style="font-size:12px;padding:2px 6px;margin-left:4px;" onclick="window.sortSolo(this, 'down')">[DOWN]</button></div>` +
+        `<div><button type="button" class="sub compact-action" style="padding:2px 6px;" onclick="window.sortSolo(this, 'up')">[UP]</button>` +
+        `<button type="button" class="sub compact-action" style="padding:2px 6px;margin-left:4px;" onclick="window.sortSolo(this, 'down')">[DOWN]</button></div>` +
         `</div>`;
     }).join("") + `</div>`;
   $("solo-containers").innerHTML = soloHtml;
@@ -2224,7 +2244,7 @@ function renderNextOrderForm(set) {
   const key=JSON.stringify([set.id,set.activeMatchIndex||0,current.currentGameIndex||0,current.customSides||current.sides,getGameStart(current,current.currentGameIndex||0),getGameSideOrder(current,current.currentGameIndex||0),getGameThrows(current,current.currentGameIndex||0)]);
   $("match-order-card").style.display="block";
   $("order-edit-content").style.display=isOrderHidden?"none":"block";
-  $("toggle-order-edit-btn").textContent=isOrderHidden?"展開する":"折りたたむ";
+  updateDisclosureButton("toggle-order-edit-btn",isOrderHidden);
   if(key===orderFormKey)return;
   orderFormKey=key;
   const activeIdx = set.activeMatchIndex || 0;
@@ -2260,8 +2280,8 @@ function renderNextOrderForm(set) {
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <b>${esc(s.name)}</b>
           <div>
-            <button type="button" class="sub" style="font-size:11px;padding:2px 6px;" onclick="window.sortTeamMember(this, 'up')">[UP チーム順]</button>
-            <button type="button" class="sub" style="font-size:11px;padding:2px 6px;margin-left:2px;" onclick="window.sortTeamMember(this, 'down')">[DOWN チーム順]</button>
+            <button type="button" class="sub compact-action" style="padding:2px 6px;" onclick="window.sortTeamMember(this, 'up')">[UP チーム順]</button>
+            <button type="button" class="sub compact-action" style="padding:2px 6px;margin-left:2px;" onclick="window.sortTeamMember(this, 'down')">[DOWN チーム順]</button>
           </div>
         </div>
         <div style="margin-top:6px;">` +
@@ -2269,8 +2289,8 @@ function renderNextOrderForm(set) {
           return `<div style="display:flex; justify-content:space-between; align-items:center; margin:4px 0;" class="next-member-item" data-member="${esc(p)}">
             <span>👤 ${esc(p)}</span>
             <div>
-              <button type="button" class="sub" style="font-size:11px;padding:1px 5px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
-              <button type="button" class="sub" style="font-size:11px;padding:1px 5px;margin-left:2px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button>
+              <button type="button" class="sub compact-action" style="padding:1px 5px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
+              <button type="button" class="sub compact-action" style="padding:1px 5px;margin-left:2px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button>
             </div>
           </div>`;
         }).join("") + `</div></div>`;
@@ -2282,8 +2302,8 @@ function renderNextOrderForm(set) {
         return `<div style="display:flex; justify-content:space-between; align-items:center; margin:6px 0; padding:6px; background:#f9f9f9; border-radius:4px;" class="next-side-item" data-side-name="${esc(s.name)}">
           <span style="font-weight:bold;"><span data-order-position>${soloOrderPositionText(idx)}</span><span>${esc(s.name)}</span></span>
           <div>
-            <button type="button" class="sub" style="font-size:12px;padding:2px 6px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
-            <button type="button" class="sub" style="font-size:12px;padding:2px 6px;margin-left:4px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button>
+            <button type="button" class="sub compact-action" style="padding:2px 6px;" onclick="window.sortTeamMember(this, 'up')">[UP]</button>
+            <button type="button" class="sub compact-action" style="padding:2px 6px;margin-left:4px;" onclick="window.sortTeamMember(this, 'down')">[DOWN]</button>
           </div>
         </div>`;
       }).join("") + `</div>`;
@@ -2293,26 +2313,35 @@ function renderNextOrderForm(set) {
   $("match-order-card").style.display="block";
 }
 
-$("toggle-order-edit-btn").onclick = () => {
+function updateDisclosureButton(id,hidden){
+  const headings={"toggle-block-config":"solo-block-card","toggle-order-edit-btn":"match-order-card","toggle-tournament-overview":"tournament-overview"};
+  $(headings[id]).open=!hidden;
+  $(id).setAttribute("aria-expanded",String(!hidden));
+}
+
+$("toggle-order-edit-btn").onclick = event => {
+  if(event)event.preventDefault(); // 標準の開閉との二重反転を防ぎ、既存の状態管理で開閉する。
   isOrderHidden = !isOrderHidden;
   const set = data.sets[cur];
   if(set) renderNextOrderForm(set);
 };
 
-$("toggle-tournament-overview").onclick = () => {
+$("toggle-tournament-overview").onclick = event => {
+  if(event)event.preventDefault(); // 標準の開閉との二重反転を防ぎ、既存の状態管理で開閉する。
   isScheduleHidden = !isScheduleHidden;
   const set=data&&data.sets[cur];
   if(set&&view==="set")renderSet(set);
   $("tournament-tree-content").style.display = isScheduleHidden ? "none" : "block";
-  $("toggle-tournament-overview").textContent = isScheduleHidden ? "展開する" : "折りたたむ";
+  updateDisclosureButton("toggle-tournament-overview",isScheduleHidden);
 };
 
-$("toggle-block-config").onclick = () => {
+$("toggle-block-config").onclick = event => {
+  if(event)event.preventDefault(); // 標準の開閉との二重反転を防ぎ、既存の状態管理で開閉する。
   const set=data&&data.sets[cur];if(!set)return;
   const state=blockEditorState(set);state.hidden=!state.hidden;saveBlockHidden(set,state);
   isBlockConfigHidden = state.hidden;
   $("block-config-content").style.display = isBlockConfigHidden ? "none" : "block";
-  $("toggle-block-config").textContent = isBlockConfigHidden ? "展開する" : "折りたたむ";
+  updateDisclosureButton("toggle-block-config",isBlockConfigHidden);
 };
 
 function getTeamSides(){
@@ -3638,8 +3667,8 @@ function renderAppFrame(){
     const current=view==="set"&&cur===i;
     return `<button class="tab ${stateClass} ${current?"current on":""}" data-v="${i}">${esc(s.name)}${s.archived?"（中断保存）":""}</button>`;
   }).join("")+ 
-                     `<button class="tab ${view==="new"}" data-v="new">＋新しいセット</button>`+
-                     `<button class="tab ${view==="stats"}" data-v="stats">📊通算成績</button>`);
+                     `<button class="tab ${view==="new"}" data-v="new">✨ 新しいセット</button>`+
+                     `<button class="tab ${view==="stats"}" data-v="stats">📊 通算成績</button>`);
   document.querySelectorAll("#tabs button").forEach(btn => {
     const v = btn.dataset.v;
     const isActive = (view === "set" && cur.toString() === v) || (view === v);
@@ -3723,8 +3752,8 @@ function renderSoloBlockConfig(set){
   if(started&&!state.scoreAutoCollapsed){state.scoreAutoCollapsed=true;state.hidden=true;saveBlockHidden(set,state);}
   isBlockConfigHidden=state.hidden;
   $("block-config-content").style.display = isBlockConfigHidden ? "none" : "block";
-  $("toggle-block-config").textContent = isBlockConfigHidden ? "展開する" : "折りたたむ";
-  $("block-config-title").textContent = isLeagueSet(set.type) ? "リーグ戦のブロック設定" : "個人フリーのブロック設定";
+  updateDisclosureButton("toggle-block-config",isBlockConfigHidden);
+  $("block-config-title").textContent = isLeagueSet(set.type) ? "🧩 リーグ戦のブロック設定" : "🧩 個人フリーのブロック設定";
   const maxBlocks=isLeagueSet(set.type)?3:Math.max(1,Math.floor(set.sides.length/2));
   $("block-config-desc").textContent = isLeagueSet(set.type) ? "参加者を1～3ブロックに分け、各ブロック内で総当たり対戦を行います。試合開始前に設定してください。各ブロックに2人以上必要です。" : `参加者を1～${maxBlocks}ブロックに分けます。同じブロックの全員が一斉に対戦します。各ブロックに2人以上割り当てます。試合開始前に設定してください。`;
   const renderKey=JSON.stringify([blockConfigFingerprint(set),state.draft,state.busy]);
@@ -3944,7 +3973,7 @@ function renderSetMemberRows(){
   $("set-members-editor").innerHTML=draft.rows.map((row,index)=>{
     const chosen=row.side>=0?row.side:(row.lastSide||0);
     const busy=getActiveSetMembers(data).has(row.name);
-    const removeButton=isFixedHomeMember(row.name)?"":`<button type="button" class="sub" data-set-member-remove="${index}" ${!currentPlayer||setMemberSaving||busy?"disabled":""} title="${busy?"未終了セットから外して保存した後に削除できます":"部屋の参加者一覧から削除（過去成績は保持）"}" style="font-size:12px;padding:4px 8px;">削除</button>`;
+    const removeButton=isFixedHomeMember(row.name)?"":`<button type="button" class="sub compact-action" data-set-member-remove="${index}" ${!currentPlayer||setMemberSaving||busy?"disabled":""} title="${busy?"未終了セットから外して保存した後に削除できます":"部屋の参加者一覧から削除（過去成績は保持）"}" style="padding:4px 8px;">削除</button>`;
     return `<div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap;"><label style="display:inline-flex;align-items:center;gap:6px;margin:0;"><input type="checkbox" data-set-member-check="${index}" ${row.side>=0?"checked":""} ${locked?"disabled":""} style="width:18px;height:18px;margin:0;">${esc(row.name)}</label>${draft.teams.length>1?`<select data-set-member-team="${index}" aria-label="${esc(row.name)}の所属チーム" ${locked||row.side<0?"disabled":""} style="width:auto;">${draft.teams.map((name,i)=>`<option value="${i}" ${chosen===i?"selected":""}>${esc(name)}</option>`).join("")}</select>`:""}${removeButton}</div>`;
   }).join("");
   document.querySelectorAll("[data-set-member-remove]").forEach(button=>button.onclick=()=>removeRoomParticipant(draft.rows[Number(button.dataset.setMemberRemove)].name));
@@ -4108,9 +4137,9 @@ function renderSetSchedule(context){
   const {set,activeIdx,S}=context;
   if(isTournamentSet(set.type) || isLeagueSet(set.type)) {
     $("tournament-overview").classList.remove("hide");
-    $("tournament-overview-title").textContent = isLeagueSet(set.type) ? "📋 リーグ戦 / 対戦スケジュール" : "🌳 トーナメント表 / 対戦スケジュール";
+    $("tournament-overview-title").textContent = isLeagueSet(set.type) ? "🗓️ リーグ戦 / 対戦スケジュール" : "🌳 トーナメント表 / 対戦スケジュール";
     $("tournament-tree-content").style.display=isScheduleHidden?"none":"block";
-    $("toggle-tournament-overview").textContent=isScheduleHidden?"展開する":"折りたたむ";
+    updateDisclosureButton("toggle-tournament-overview",isScheduleHidden);
     if(isScheduleHidden)return;
     let treeHtml = `<ul>` + set.matches.map((mt, idx) => {
       const mw = getMatchWinner(mt, set.missRule, set.overRule, isTeamSet(set.type));
@@ -4164,10 +4193,10 @@ function renderSetSchedule(context){
       const bronzeWinner=bronzeMatch?getMatchWinner(bronzeMatch,set.missRule,set.overRule,isTeamSet(set.type)):null;
       if(set.tournamentBracketVersion===2&&S.over){
         const standings=getTournamentStandings(set),counts=new Map();standings.forEach(row=>counts.set(row.rank,(counts.get(row.rank)||0)+1));
-        treeHtml+=`<h4>大会順位</h4><table><tr><th>順位</th><th>参加者</th></tr>`+standings.map(row=>`<tr><td>${counts.get(row.rank)>1?"同率":""}${row.rank}位</td><td>${sideLabel(set,{name:row.name})}</td></tr>`).join("")+`</table>`;
+        treeHtml+=`<h4>🏅 大会順位</h4><table><tr><th>順位</th><th>参加者</th></tr>`+standings.map(row=>`<tr><td>${counts.get(row.rank)>1?"同率":""}${row.rank}位</td><td>${sideLabel(set,{name:row.name})}</td></tr>`).join("")+`</table>`;
       } else if(set.sides.length===3&&S.over) {
         const podiumRows=getThreePlayerTournamentStandings(set).map(row=>[`${row.rank}位`,row.name]);
-        treeHtml+=`<h4>大会順位</h4><table><tr><th>区分</th><th>参加者</th></tr>`+podiumRows.map(row=>`<tr><td>${esc(row[0])}</td><td>${sideLabel(set,{name:row[1]})}</td></tr>`).join("")+`</table>`;
+        treeHtml+=`<h4>🏅 大会順位</h4><table><tr><th>区分</th><th>参加者</th></tr>`+podiumRows.map(row=>`<tr><td>${esc(row[0])}</td><td>${sideLabel(set,{name:row[1]})}</td></tr>`).join("")+`</table>`;
       } else if(set.sides.length===7&&S.over&&set.matches.some(match=>match.bracket==="loser_round2")) {
         const podiumRows=[];
         const appendRanks=(bracket,winRank,loseRank)=>{
@@ -4184,25 +4213,25 @@ function renderSetSchedule(context){
         appendRanks("loser_round2",5,6);
         appendRanks("loser_round1",null,7);
         podiumRows.sort((a,b)=>a[0]-b[0]);
-        treeHtml+=`<h4>大会順位</h4><table><tr><th>順位</th><th>参加者</th></tr>`+podiumRows.map(row=>`<tr><td>${row[0]}位</td><td>${sideLabel(set,{name:row[1]})}</td></tr>`).join("")+`</table>`;
+        treeHtml+=`<h4>🏅 大会順位</h4><table><tr><th>順位</th><th>参加者</th></tr>`+podiumRows.map(row=>`<tr><td>${row[0]}位</td><td>${sideLabel(set,{name:row[1]})}</td></tr>`).join("")+`</table>`;
       } else if(finalWinner!==null&&bronzeWinner!==null) {
         const finalSides=finalMatch.customSides||finalMatch.sides,bronzeSides=bronzeMatch.customSides||bronzeMatch.sides;
         const podiumRows=[["優勝",finalSides[finalWinner].name],["準優勝",finalSides[finalWinner===0?1:0].name],["3位",bronzeSides[bronzeWinner].name]];
         const podiumNames=new Set(podiumRows.map(row=>row[1]));
         const otherNames=set.sides.map(side=>side.name).filter(name=>!podiumNames.has(name));
         if(otherNames.length)podiumRows.push(["その他",otherNames.join("・")]);
-        treeHtml+=`<h4>大会順位</h4><table><tr><th>区分</th><th>参加者</th></tr>`+podiumRows.map(row=>`<tr><td>${esc(row[0])}</td><td>${row[1].split("・").map(name=>sideLabel(set,{name})).join("・")}</td></tr>`).join("")+`</table>`;
+        treeHtml+=`<h4>🏅 大会順位</h4><table><tr><th>区分</th><th>参加者</th></tr>`+podiumRows.map(row=>`<tr><td>${esc(row[0])}</td><td>${row[1].split("・").map(name=>sideLabel(set,{name})).join("・")}</td></tr>`).join("")+`</table>`;
       }
     }
     if(isLeagueSet(set.type)) {
       const standings=getLeagueStandings(set);
-      treeHtml += standings.map(block=>`<h4>${esc(block.name)}順位</h4><table><tr><th>順位</th><th>名前</th><th>試合</th><th>勝</th><th>総得点</th><th>失点</th><th>得失点</th><th>直接対決</th></tr>`+
+      treeHtml += standings.map(block=>`<h4>🏅 ${esc(block.name)}順位</h4><table><tr><th>順位</th><th>名前</th><th>試合</th><th>勝</th><th>総得点</th><th>失点</th><th>得失点</th><th>直接対決</th></tr>`+
         block.standings.map(row=>`<tr><td>${row.rank}</td><td>${sideLabel(set,{name:row.name})}</td><td>${row.matchesPlayed}</td><td>${row.wins}</td><td>${row.pointsFor}</td><td>${row.pointsAgainst}</td><td>${row.differential}</td><td>${row.headToHeadWins}</td></tr>`).join("")+`</table>`).join("");
     }
-    if(set.tournamentBracketVersion===2)treeHtml=renderPowerTournamentBracket(set)+"<h4>対戦スケジュール</h4>"+treeHtml;
+    if(set.tournamentBracketVersion===2)treeHtml=renderPowerTournamentBracket(set)+"<h4>🗓️ 対戦スケジュール</h4>"+treeHtml;
     setHTMLIfChanged($("tournament-tree-content"),treeHtml);
     $("tournament-tree-content").style.display = isScheduleHidden ? "none" : "block";
-    $("toggle-tournament-overview").textContent = isScheduleHidden ? "展開する" : "折りたたむ";
+    updateDisclosureButton("toggle-tournament-overview",isScheduleHidden);
   } else {
     $("tournament-overview").classList.add("hide");
   }
