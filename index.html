@@ -99,7 +99,7 @@ button.compact-action,.home-member-chip button,.match-timer-box button.sub{font-
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v3.00</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v3.01</span></h1>
 <p id="app-lock-status" class="pl" role="status" hidden></p>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
@@ -186,7 +186,7 @@ button.compact-action,.home-member-chip button,.match-timer-box button.sub{font-
 <option value="total" selected>③ ゲーム数を決める（合計得点が多いサイドの勝ち）</option>
 </select></label>
 </div>
-<p id="league-games-desc" class="pl hide">各対戦カードで設定したゲーム数を行い、合計得点で勝者を決めます。同点の場合は延長ゲームを行います。</p>
+<p id="league-games-desc" class="pl hide">各対戦カードで設定したゲーム数を行い、合計得点で勝者を決めます。同点の場合は延長ゲームを行います。5人・5チーム以上の同一リーグでは連続出場しない対戦順にします。3～4人・チームでは連続出場を完全にはなくせないため、できるだけ少なくします。</p>
 <div id="league-game-first-box" class="hide">
 <label>対戦カード内の複数ゲームの先攻 <select id="league-game-first"><option value="rotate">順番に交代する</option><option value="loser" selected>前のゲームの得点が低い順</option><option value="same">いつも同じサイド</option></select></label>
 </div>
@@ -1389,6 +1389,43 @@ function getSetTotalScores(set) {
     }
   });
   return totals;
+}
+
+// 総当たりをラウンドに分け、ラウンド境界も含めた連続出場を最小化。
+// 各ラウンド内は全員が高々1回出場する。5サイド以上では連続出場ゼロ。
+function buildLeaguePairs(sides){
+  if(sides.length<2)return [];
+  let ring=shuffleArray([...sides]);
+  if(ring.length%2)ring.push(null);
+  let states=[{last:null,cost:0,pairs:[]}];
+  const overlaps=(a,b)=>a&&a.some(side=>b.includes(side));
+  for(let round=0;round<ring.length-1;round++){
+    const pairs=[];
+    for(let i=0;i<ring.length/2;i++){
+      const a=ring[i],b=ring[ring.length-1-i];
+      if(a!==null&&b!==null)pairs.push([a,b]);
+    }
+    const choices=shuffleArray(pairs),next=new Map();
+    // 同一ラウンドの内部は互いに重ならないので、先頭と末尾だけで状態を比較できる。
+    for(const first of choices){
+      const rest=choices.filter(pair=>pair!==first);
+      for(const last of rest.length?rest:[first]){
+        const ordered=rest.length?[first,...rest.filter(pair=>pair!==last),last]:[first];
+        for(const state of states){
+          const cost=state.cost+(overlaps(state.last,first)?1:0);
+          if(!next.has(last)||cost<next.get(last).cost)
+            next.set(last,{last,cost,pairs:[...state.pairs,...ordered]});
+        }
+      }
+    }
+    states=[...next.values()];
+    ring=[ring[0],ring[ring.length-1],...ring.slice(1,-1)];
+  }
+  // 対戦順だけを変更し、カード内の基準順は元の参加者一覧にそろえる。
+  // 登録順・カスタム・逆順・シャッフルの先攻条件を従来どおり適用する。
+  const positions=new Map(sides.map((side,index)=>[side,index]));
+  return states.reduce((best,state)=>state.cost<best.cost?state:best).pairs.map(pair=>
+    positions.get(pair[0])<positions.get(pair[1])?pair:[pair[1],pair[0]]);
 }
 
 function getLeagueStandings(set){
@@ -2697,13 +2734,7 @@ async function createSet(set, replacement=null){
         exchange.tournamentMode="game1";exchange.fixedFiftyPoint=true;delete exchange.gamesToPlay;
       }
     } else if(isLeagueSet(set.type)){
-      const pairs = [];
-      for(let i=0; i<set.sides.length; i++){
-        for(let j=i+1; j<set.sides.length; j++){
-          pairs.push([set.sides[i], set.sides[j]]);
-        }
-      }
-      const shuffledPairs = shuffleArray(pairs);
+      const shuffledPairs = buildLeaguePairs(set.sides);
       const leagueMode = "match_total";
       matches = shuffledPairs.map(p => {
         const match = {
@@ -3836,7 +3867,7 @@ $("save-solo-blocks").onclick = async () => {
     const gameFirstRule=set.gameFirstRule||$("league-game-first").value||"rotate";
     groups.forEach((block,blockIndex)=>{
       const sides=block.players.map(name=>byName.get(name));
-      const pairs=shuffleArray(sides.flatMap((side,i)=>sides.slice(i+1).map(opponent=>[side,opponent])));
+      const pairs=buildLeaguePairs(sides);
       pairs.forEach(([a,b],i)=>{
         const match={sides:getFirstGameSides(set,[a,b]),start:0,gameStarts:[0],gameFirstRule,throws:[],game1:[],game2:[],game3:[],currentGameIndex:0,tournamentMode:leagueMode,blockName:block.name,round:i+1,blockOrder:blockIndex};
         if(leagueMode === "match_total") match.gamesToPlay=Math.max(2,parseInt(set.games,10)||2);
