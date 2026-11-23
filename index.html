@@ -99,7 +99,7 @@ button.compact-action,.home-member-chip button,.match-timer-box button.sub{font-
 </div>
 </div>
 <div id="content" hidden>
-<h1>🎯 モルック スコア <span class="ver-badge">v3.01</span></h1>
+<h1>🎯 モルック スコア <span class="ver-badge">v3.07</span></h1>
 <p id="app-lock-status" class="pl" role="status" hidden></p>
 <div id="storage-warning" class="card hide" role="status" aria-live="polite"></div>
 <div id="home">
@@ -313,7 +313,15 @@ button.compact-action,.home-member-chip button,.match-timer-box button.sub{font-
 <p id="history-targets" class="pl"></p><p id="history-last-saved" class="pl" role="status"></p><p id="history-status" role="status"></p>
 <p><label>開始日 <input type="date" id="history-from"></label> ～ <label>終了日 <input type="date" id="history-to"></label> <button id="history-load" class="sub">保存記録を読込・更新</button></p>
 <p class="pl">期間が空欄なら全期間、同じ日を指定すると日別です。名前が同じ人は同一人物として集計します。名前変更前後は別集計です。</p>
-<p><button id="history-copy" class="sub" disabled>生涯・期間別成績をコピー（Excel用）</button></p><p id="history-read-status" role="status"></p><div id="history-results"></div><p id="history-sources" class="pl"></p>
+<p><button id="history-copy" class="sub" disabled>生涯・期間別成績をコピー（Excel用）</button></p><p id="history-read-status" role="status"></p><div id="history-results"></div>
+<details id="history-rooms-panel" style="margin-top:12px;">
+<summary class="disclosure-summary">🏠 これまでの部屋履歴</summary>
+<p class="pl">保存記録と、Firestoreに残っている部屋を日付・部屋別に表示します。参加者は保存記録と部屋の参加者情報から表示します。日付は保存時の開催日、未保存の部屋は作成日（日本時間）です。成立ゲーム数は勝敗が決まったゲームだけを数え、途中・スキップは除きます。古い保存記録の不明分は、部屋情報の読込または終了セットの再保存で反映できます。期間指定は成績表と共通です。9999は除きます。</p>
+<p><button type="button" id="history-rooms-load" class="sub">未保存の部屋も読込・更新</button></p>
+<p id="history-rooms-status" class="pl" role="status">未保存分は上のボタンで読み込めます。未保存分は生涯成績の集計には含めません。</p>
+<div id="history-sources" class="pl" style="white-space:pre-line;overflow-wrap:anywhere;">保存記録を読み込むと表示されます。</div>
+<div id="history-zero-delete-controls"></div>
+</details>
 </details></div>
 
 </div>
@@ -2559,17 +2567,52 @@ function applyNextMatchScoreOrder(d,beforeIndices){
     next.start=0;next.gameStarts=[0];next.gameOrders={0:next.customSides.map((_,i)=>i)};
   }
 }
+function setTimestampInfo(set){
+  const result={};
+  for(const key of ["createdAt","firstThrowAt","finishedAt","lastOperationAt"]){
+    const value=set[key];result[key]=Number.isSafeInteger(value)&&value>0&&Number.isFinite(new Date(value).getTime())?value:null;
+  }
+  return result;
+}
+function stampChangedSets(roomData,before,now){
+  for(const set of roomData.sets){
+    const snapshot=before.get(set.id);
+    if(snapshot===JSON.stringify(set))continue;
+    const old=snapshot?JSON.parse(snapshot):null;
+    // コピー作成では新規日時、参加者編集による再構成では元の日時を維持する。
+    for(const key of ["createdAt","firstThrowAt","finishedAt","lastOperationAt"]){
+      if(old&&Object.prototype.hasOwnProperty.call(old,key))set[key]=old[key];else delete set[key];
+    }
+    if(!old)set.createdAt=now;
+    if(!set.firstThrowAt&&(!old||!hasSetThrows(old))&&hasSetThrows(set))set.firstThrowAt=now;
+    const over=summarize(set).over;
+    if(!over)delete set.finishedAt;
+    else if(!old||!summarize(old).over)set.finishedAt=set.archived&&Number.isSafeInteger(set.archivedAt)?set.archivedAt:now;
+    set.lastOperationAt=now;
+  }
+}
+function formatSetTimestamp(value){
+  if(!Number.isSafeInteger(value)||value<=0||!Number.isFinite(new Date(value).getTime()))return "不明";
+  return new Date(value).toLocaleString("sv-SE",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"});
+}
+function setTimestampLines(set){
+  const times=setTimestampInfo(set);
+  return [["作成",times.createdAt],["初投",times.firstThrowAt],["終了",times.finishedAt],["最終操作",times.lastOperationAt]].map(([label,value])=>label+"："+formatSetTimestamp(value)).join("<br>");
+}
+
 async function mutate(fn,options={}){
   if(roomSyncBlocked){alert("最新の記録を受信できていません。再接続してから操作してください。");return false;}
   if(!currentPlayer){alert("観戦中は変更できません。");return;}
-  let sizeLimitExceeded=false;
+  let sizeLimitExceeded=false,timestampsOmitted=false;
   const saved=await runTransaction(db,async tx=>{
+    sizeLimitExceeded=false;timestampsOmitted=false;
     const ref=doc(db,"rooms",room),d=(await tx.get(ref)).data();
     if(!hasPlayerSession(d)){alert("この名前の利用権限がありません。名前を選び直してください。");return;}
     recoverSkippedActiveMatch(d);
     const beforeSharedTimers=d.sharedTimers;
     const beforeCapacityProfile=firestoreCapacityProfile(ref.path||"rooms/"+room,d);
     const beforeIndices=new Map(d.sets.map(set=>[set.id,set.activeMatchIndex||0]));
+    const beforeSetTimestamps=new Map(d.sets.map(set=>[set.id,JSON.stringify(set)]));
     const protectedSets=new Map(d.sets.filter(set=>set.archived).map(set=>[set.id,JSON.stringify(set)]));
     if(fn(d)===false)return;
     for(const [id,snapshot] of protectedSets){
@@ -2583,10 +2626,27 @@ async function mutate(fn,options={}){
     }
     const timersSettled=settleSharedTimers(d);
     const timersChanged=timersSettled||d.sharedTimers!==beforeSharedTimers;
+    stampChangedSets(d,beforeSetTimestamps,Date.now());
     try{capacityUpdate(tx,ref,d,{players:d.players,sets:d.sets,...(timersChanged?{sharedTimers:d.sharedTimers}:{})},beforeCapacityProfile);}
-    catch(error){if(error.code==='capacity-limit'){sizeLimitExceeded=error.message;return;}throw error;}
+    catch(error){
+      if(error.code!=="capacity-limit")throw error;
+      // 上限付近の旧データでも、日時欄の新設だけで得点修正を拒否しない。
+      // 既存の日時は維持し、新規追加した日時だけを省いて容量制限を再確認する。
+      let removed=false;
+      for(const set of d.sets){
+        const snapshot=beforeSetTimestamps.get(set.id);if(!snapshot)continue;
+        const old=JSON.parse(snapshot);
+        for(const key of ["createdAt","firstThrowAt","finishedAt","lastOperationAt"]){
+          if(Object.prototype.hasOwnProperty.call(set,key)&&!Object.prototype.hasOwnProperty.call(old,key)){delete set[key];removed=true;}
+        }
+      }
+      if(!removed){sizeLimitExceeded=error.message;return;}
+      try{capacityUpdate(tx,ref,d,{players:d.players,sets:d.sets,...(timersChanged?{sharedTimers:d.sharedTimers}:{})},beforeCapacityProfile);timestampsOmitted=true;}
+      catch(retryError){if(retryError.code==="capacity-limit"){sizeLimitExceeded=retryError.message;return;}throw retryError;}
+    }
     return true;
   });
+  if(saved===true&&timestampsOmitted)alert("操作は保存しましたが、部屋の容量上限のため、新しく追加する日時は記録できませんでした。不要なセットを整理してください。");
   if(sizeLimitExceeded)alert(sizeLimitExceeded);
   return saved===true;
 }
@@ -3564,7 +3624,8 @@ async function changeSharedTimer(action){
         next={...old,running:false,pausedAt:serverTimestamp(),revision:expected+1};
       }else if(action!=="reset")throw Error("タイマー操作が不正です。");
       const sharedTimers={...(latest.sharedTimers||{}),[target.key]:next};
-      capacityUpdate(tx,ref,latest,{sharedTimers});
+      actualSet.lastOperationAt=Date.now();
+      capacityUpdate(tx,ref,latest,{sharedTimers,sets:latest.sets});
     });
     return true;
   }catch(error){alert("タイマーを変更できませんでした："+(error.message||"通信状態を確認してください。"));return false;}
@@ -4439,6 +4500,7 @@ function validateHistoryRecords(records){
     const ids=new Set();
     for(const entry of record.entries){
       if(!entry||typeof entry.id!=="string"||!entry.id||ids.has(entry.id)||!Array.isArray(entry.rows))throw Error("保存されたセットの形式・重複を確認してください。");
+      if(entry.completedGames!==undefined&&(!Number.isSafeInteger(entry.completedGames)||entry.completedGames<0))throw Error("成立ゲーム数の形式を確認してください。");
       ids.add(entry.id);const names=new Set();
       for(const row of entry.rows){
         if(!row||typeof row.name!=="string"||!row.name||names.has(row.name)||HISTORY_FIELDS.some(field=>!Number.isSafeInteger(row[field])||row[field]<0)||row.win>row.played||row.zero>row.n)throw Error("保存された成績の形式を確認してください。");
@@ -4481,6 +4543,7 @@ function historyStable(value){
 }
 async function historyFingerprint(set){
   const normalized=JSON.parse(JSON.stringify(set));
+  delete normalized.lastOperationAt; // タイマー操作だけでは成績を訂正扱いにしない。
   normalized.activeMatchIndex=normalized.activeMatchIndex||0;
   for(const match of normalized.matches||[]){
     match.currentGameIndex=match.currentGameIndex||0;
@@ -4529,11 +4592,11 @@ function historyEntryComparable(entry){
 }
 function drawHistorySetList(){
   const typeNames={solo:"個人フリー",team:"団体戦",league:"個人リーグ",team_league:"団体リーグ",tournament:"個人トーナメント",team_tournament:"団体トーナメント"};
-  $("setlist").innerHTML=data.sets.length?"<div style='overflow-x:auto'><table><tr><th>セット名</th><th>種類</th><th>状態</th><th>ゲーム数</th><th>計測時間</th><th>生涯成績への保存</th><th>操作</th></tr>"+data.sets.map(set=>{
+  $("setlist").innerHTML=data.sets.length?"<div style='overflow-x:auto'><table><tr><th>セット名</th><th>種類</th><th>状態</th><th>ゲーム数</th><th>計測時間</th><th>日時（日本時間）</th><th>生涯成績への保存</th><th>操作</th></tr>"+data.sets.map(set=>{
     const status=set.archived?"中断終了":summarize(set).over?"終了":hasSetThrows(set)?"進行中":"未開始";
     const saved=room==="9999"?"対象外（テスト部屋）":historyLabels.get(String(set.id))||"確認中";
-    return `<tr><td>${esc(set.name||"名称なし")}</td><td>${esc(typeNames[set.type]||set.type||"不明")}</td><td>${status}</td><td>${archiveCompletedGames(set)}</td><td data-set-elapsed="${esc(set.id)}">${esc(setElapsedTime(set,data))}</td><td>${esc(saved)}</td><td>${currentPlayer&&canDeleteSet(set)?`<button type="button" class="sub" data-delete-unstarted-set="${esc(set.id)}" ${deleteSetBusy?"disabled":""}>削除</button>`:""}</td></tr>`;
-  }).join("")+"</table></div><p class='pl'>ゲーム数は完了したゲームのみ（延長を含む）。未実施・スキップ・勝敗未確定の中断は含みません。保存状態は現在のセットと保存内容を比較しています。別端末の訂正も再確認します。</p>":"この部屋にはまだセットがありません。";
+    return `<tr><td>${esc(set.name||"名称なし")}</td><td>${esc(typeNames[set.type]||set.type||"不明")}</td><td>${status}</td><td>${archiveCompletedGames(set)}</td><td data-set-elapsed="${esc(set.id)}">${esc(setElapsedTime(set,data))}</td><td class="pl" style="text-align:left;white-space:nowrap;">${setTimestampLines(set)}</td><td>${esc(saved)}</td><td>${currentPlayer&&canDeleteSet(set)?`<button type="button" class="sub" data-delete-unstarted-set="${esc(set.id)}" ${deleteSetBusy?"disabled":""}>削除</button>`:""}</td></tr>`;
+  }).join("")+"</table></div><p class='pl'>ゲーム数は完了したゲームのみ（延長を含む）。未実施・スキップ・勝敗未確定の中断は含みません。日時は保存が成功した操作に基づきます。追加前の記録など、分からない日時は「不明」です。保存状態は現在のセットと保存内容を比較しています。別端末の訂正も再確認します。</p>":"この部屋にはまだセットがありません。";
   document.querySelectorAll("[data-delete-unstarted-set]").forEach(button=>button.onclick=()=>deleteUnstartedSet(button.dataset.deleteUnstartedSet));
 }
 async function refreshHistorySetList(){
@@ -4630,7 +4693,7 @@ function buildHistoryRecord(code,d,old,day){
     }
     for(const row of rows)if(HISTORY_FIELDS.some(field=>!Number.isSafeInteger(row[field])||row[field]<0))throw Error("成績に不正な値があります。");
     if(!rows.some(row=>row.played>0)){entries.delete(String(set.id));continue;}
-    entries.set(String(set.id),{id:String(set.id),name:set.name||"",type:set.type,archived:!!set.archived,rows});
+    entries.set(String(set.id),{id:String(set.id),name:set.name||"",type:set.type,archived:!!set.archived,completedGames:archiveCompletedGames(set),...setTimestampInfo(set),rows});
   }
   if(entries.size>500)throw Error("保存セットが500件を超えています。部屋を分けてください。");
   const result={schema:1,roomCode:code,created:d.created,playedAt:day,entries:[...entries.values()],updatedAt:Date.now()};
@@ -4693,16 +4756,164 @@ function historyTotals(records,from,to){
   }
   return [...totals.values()].sort((a,b)=>b.win-a.win||b.pts-a.pts||a.name.localeCompare(b.name,"ja"));
 }
+let historyLiveRooms=[],historyRoomsLoading=false,historyRoomsLoaded=false;
+function historyRoomSummaries(records,liveRooms=[]){
+  const rooms=new Map(),savedByGeneration=new Map();
+  const nameInto=(row,name)=>{if(typeof name==="string"&&name.trim()&&!/^.+の\d+人目$/.test(name))row.participants.add(name);};
+  const getRow=(day,code)=>{
+    const key=day+":"+code;
+    if(!rooms.has(key))rooms.set(key,{day,code,participants:new Set(),savedKeys:new Set(),unsavedKeys:new Set(),gamesBySet:new Map(),sources:new Map()});
+    return rooms.get(key);
+  };
+  for(const record of records){
+    if(record.roomCode==="9999"||record.schema!==1||!historyDay(record.playedAt))continue;
+    const generation=record.roomCode+":"+record.created,row=getRow(record.playedAt,record.roomCode);
+    savedByGeneration.set(generation,record);
+    row.sources.set(generation,{code:record.roomCode,created:record.created,hadLive:false});
+    (record.entries||[]).forEach((entry,index)=>{
+      const setKey=generation+":"+(entry.id??index);
+      row.savedKeys.add(setKey);
+      row.gamesBySet.set(setKey,Number.isSafeInteger(entry.completedGames)&&entry.completedGames>=0?entry.completedGames:null);
+      for(const person of entry.rows||[])nameInto(row,person.name);
+    });
+  }
+  for(const live of liveRooms){
+    if(live.code==="9999")continue;
+    const generation=live.code+":"+live.created,saved=savedByGeneration.get(generation);
+    const row=getRow(saved?saved.playedAt:live.day,live.code);
+    row.sources.set(generation,{code:live.code,created:live.created,hadLive:true});
+    const savedIds=new Set((saved?.entries||[]).map(entry=>String(entry.id)));
+    for(const name of live.players||[])nameInto(row,name);
+    (live.sets||[]).forEach((set,index)=>{
+      const id=String(set.id??("missing-id-"+index));
+      const setKey=generation+":"+id;
+      if(!savedIds.has(id))row.unsavedKeys.add(setKey);
+      if(Number.isSafeInteger(set.completedGames)&&set.completedGames>=0)row.gamesBySet.set(setKey,set.completedGames);
+      else if(!row.gamesBySet.has(setKey))row.gamesBySet.set(setKey,null);
+      for(const name of set.participants||[])nameInto(row,name);
+      for(const side of [...(Array.isArray(set.sides)?set.sides:[]),...(Array.isArray(set.matches)?set.matches:[]).flatMap(match=>Array.isArray(match?.customSides)?match.customSides:Array.isArray(match?.sides)?match.sides:[])]){
+        if(side&&Array.isArray(side.players))for(const name of side.players)nameInto(row,name);
+      }
+    });
+  }
+  return [...rooms.values()].map(row=>({day:row.day,code:row.code,sources:[...row.sources.values()],count:row.savedKeys.size+row.unsavedKeys.size,saved:row.savedKeys.size,unsaved:row.unsavedKeys.size,completedGames:[...row.gamesBySet.values()].reduce((sum,n)=>sum+(n??0),0),unknownGameSets:[...row.gamesBySet.values()].filter(n=>n===null).length,participants:[...row.participants].sort((a,b)=>a.localeCompare(b,"ja"))})).sort((a,b)=>b.day.localeCompare(a.day)||a.code.localeCompare(b.code));
+}
+let historyZeroDeleteBusy=false,historyZeroDeleteTargets=new Map(),historyZeroDeleteRows=[];
+function renderHistoryDeleteControls(rooms){
+  historyZeroDeleteRows=rooms;
+  historyZeroDeleteTargets.clear();
+  const eligible=isAdmin()&&!historyLoading&&!historyLoadError&&!historyRoomsLoading?rooms.filter(row=>row.completedGames===0&&row.unknownGameSets===0):[];
+  $("history-zero-delete-controls").innerHTML=eligible.map((row,index)=>{
+    historyZeroDeleteTargets.set(String(index),row);
+    return `<p><button type="button" class="sub" data-zero-room-delete="${index}" ${historyZeroDeleteBusy?"disabled":""} style="background:#c33;">${esc(row.day)} 部屋${esc(row.code)}を削除（成立0ゲーム）</button></p>`;
+  }).join("");
+}
+$("history-zero-delete-controls").onclick=event=>{
+  const button=event.target.closest?.("button[data-zero-room-delete]");
+  const target=button&&historyZeroDeleteTargets.get(button.dataset.zeroRoomDelete);
+  if(target)deleteZeroGameRoom(target);
+};
+function assertZeroGameHistory(record,live){
+  validateHistoryRecords([record]);
+  const liveSets=new Map((live?.sets||[]).map(set=>[String(set.id),set]));
+  for(const entry of record.entries){
+    // 成立した個人成績が残る記録は、ゲーム数欄が0でも削除しない。
+    if(entry.rows.some(row=>row.played>0)||entry.completedGames>0)throw Error("保存記録に成立ゲームがあるため削除できません。");
+    if(entry.completedGames===undefined){
+      const source=liveSets.get(entry.id);
+      if(!source||archiveCompletedGames(source)!==0)throw Error("保存記録の成立ゲーム数が不明のため削除できません。");
+    }
+  }
+}
+async function deleteZeroGameRoom(target){
+  if(historyZeroDeleteBusy||historyBusy||historyRoomsLoading||historyLoading)return false;
+  if(!isAdmin()){alert("削除はPIN認証済みの管理者（佐藤）だけが操作できます。");return false;}
+  if(!target||target.code==="9999"||target.completedGames!==0||target.unknownGameSets!==0||!target.sources?.length)return false;
+  const sources=[...new Map(target.sources.map(source=>[source.created,source])).values()];
+  if(sources.length>400||sources.some(source=>source.code!==target.code||!/^\d{4}$/.test(source.code)||!Number.isSafeInteger(source.created)||source.created<=0)){alert("削除対象の部屋情報を確認してください。");return false;}
+  if(!confirm(`${target.day} 部屋${target.code}の部屋データと保存済み履歴を削除します。\n未開始セット・途中の投球・参加者情報も削除され、元に戻せません。よろしいですか？`))return false;
+  const authRoom=room;
+  historyZeroDeleteBusy=true;historyBusy=true;renderSimpleHistory();
+  $("history-rooms-status").textContent="成立ゲーム数を再確認して削除中…";
+  try{
+    const result=await runTransaction(db,async tx=>{
+      const roomRef=doc(db,"rooms",target.code),roomSnap=await tx.get(roomRef);
+      const live=roomSnap.exists()?roomSnap.data():null;
+      const saved=await Promise.all(sources.map(async source=>{
+        const ref=doc(db,"history",source.code+"_"+source.created),snapshot=await tx.get(ref);
+        return {source,ref,record:snapshot.exists()?snapshot.data():null};
+      }));
+      if(room!==authRoom||!isAdmin())throw Error("管理者の認証状態が変わりました。");
+      let deleteLive=false;
+      for(const item of saved){
+        const matching=live&&live.created===item.source.created?live:null;
+        if(item.source.hadLive&&live&&!matching)throw Error("同じ部屋コードで部屋が作り直されています。再読込してください。");
+        if(matching){
+          if(!Array.isArray(matching.sets)||!Array.isArray(matching.players))throw Error("部屋情報の形式を確認できません。");
+          if(matching.sets.some(set=>!set||!Array.isArray(set.matches)||archiveCompletedGames(set)!==0))throw Error("成立ゲームがあるか、成立ゲーム数を確認できないため削除できません。");
+          deleteLive=true;
+        }
+        if(item.record){
+          if(item.record.roomCode!==item.source.code||item.record.created!==item.source.created)throw Error("保存記録の部屋情報が一致しません。");
+          assertZeroGameHistory(item.record,matching);
+        }
+      }
+      if(deleteLive)tx.delete(roomRef);
+      for(const item of saved)if(item.record)tx.delete(item.ref);
+      return {deleteLive,created:live?.created};
+    });
+    const ids=new Set(sources.map(source=>source.created));
+    historyRows=historyRows.filter(record=>record.roomCode!==target.code||!ids.has(record.created));
+    historyLiveRooms=historyLiveRooms.filter(record=>record.code!==target.code||!ids.has(record.created));
+    if(result.deleteLive&&room===target.code&&data?.created===result.created){
+      roomSubscriptionGeneration++;if(unsub)unsub();stopHistoryWatch();location.hash="";
+      alert("部屋と保存済み履歴を削除しました。ホーム画面に戻ります。");location.reload();
+    }else $("history-rooms-status").textContent=`部屋${target.code}の対象データと保存済み履歴を削除しました。`;
+    return true;
+  }catch(error){
+    $("history-rooms-status").textContent="削除できませんでした："+(error.code==="permission-denied"?"Firestoreの削除権限を確認してください。":error.message||"通信状態を確認してください。");
+    return false;
+  }finally{historyZeroDeleteBusy=false;historyBusy=false;renderSimpleHistory();}
+}
+
+async function loadHistoryRooms(){
+  if(historyRoomsLoading)return;
+  historyRoomsLoading=true;$("history-rooms-load").disabled=true;
+  $("history-rooms-status").textContent="部屋情報を読み込み中…";
+  try{
+    if(!historyLoaded){await loadSimpleHistory(false);if(historyLoadError)throw Error(historyLoadError);}
+    const snapshot=await getDocs(collection(db,"rooms"));
+    const next=[];let invalid=0;
+    for(const docSnapshot of snapshot.docs){
+      if(docSnapshot.id==="9999")continue;
+      const value=docSnapshot.data();
+      if(!/^\d{4}$/.test(docSnapshot.id)||!value||!Number.isSafeInteger(value.created)||value.created<=0||!Number.isFinite(new Date(value.created).getTime())||!Array.isArray(value.sets)||!Array.isArray(value.players)){invalid++;continue;}
+      const day=new Date(value.created).toLocaleDateString("sv-SE",{timeZone:"Asia/Tokyo"});
+      if(!historyDay(day)){invalid++;continue;}
+      // 投球履歴を保持せず、一覧に必要なID・参加者だけをキャッシュする。
+      const sets=value.sets.filter(set=>set&&typeof set==="object").map(set=>({id:set.id,completedGames:(()=>{try{return archiveCompletedGames(set);}catch{return null;}})(),participants:uniq([...(Array.isArray(set.sides)?set.sides:[]),...(Array.isArray(set.matches)?set.matches:[]).flatMap(match=>Array.isArray(match?.customSides)?match.customSides:Array.isArray(match?.sides)?match.sides:[])].filter(side=>side&&Array.isArray(side.players)).flatMap(side=>side.players).filter(name=>typeof name==="string"))}));
+      next.push({code:docSnapshot.id,created:value.created,day,players:value.players,sets});
+    }
+    historyLiveRooms=next;historyRoomsLoaded=true;renderSimpleHistory();
+    $("history-rooms-status").textContent=(snapshot.metadata?.fromCache?"キャッシュ表示（最新未確認）":"部屋情報の読込完了")+`：${next.length}部屋。保存記録の有無で分類します。再保存が必要な変更の有無は含みません。未保存分は生涯成績に含めません。${invalid?` 形式を確認できない${invalid}部屋は除外しました。`:""}`;
+  }catch(error){
+    $("history-rooms-status").textContent="部屋情報を読込できませんでした："+(error.code==="permission-denied"?"Firestoreのroomsの読取権限を確認してください。":error.message||"通信状態を確認してください。")+(historyRoomsLoaded?" 未保存分は前回読込時の表示です。":" 保存記録のみ表示しています。");
+  }finally{historyRoomsLoading=false;$("history-rooms-load").disabled=false;renderSimpleHistory();}
+}
+$("history-rooms-load").onclick=loadHistoryRooms;
+
 function renderSimpleHistory(){
   try{
     const rows=historySelectedRows(),from=$("history-from").value,to=$("history-to").value;
     historyRenderError="";
     $("history-results").innerHTML=rows.length?"<div style='overflow-x:auto'><table><tr><th>名前</th><th>ゲーム数</th><th>勝</th><th>勝率</th><th>セット優勝</th><th>投球</th><th>総得点</th><th>平均点</th><th>0点</th><th>0点率</th></tr>"+rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.played}</td><td>${r.win}</td><td>${r.played?Math.round(r.win/r.played*100)+"%":"-"}</td><td>${r.setWin}</td><td>${r.n}</td><td>${r.pts}</td><td>${r.n?(r.pts/r.n).toFixed(1):"-"}</td><td>${r.zero}</td><td>${r.n?(r.zero/r.n*100).toFixed(1)+"%":"-"}</td></tr>`).join("")+"</table></div>":"対象の保存記録はありません。";
-    const selected=historyRows.filter(r=>r.roomCode!=="9999"&&r.schema===1&&(!from||r.playedAt>=from)&&(!to||r.playedAt<=to));
-    $("history-sources").textContent=selected.map(r=>`${r.playedAt} 部屋${r.roomCode}：${(r.entries||[]).length}セット ／ 最終保存 ${historySavedTime(r.updatedAt)}（日本時間）`).join(" ／ ");
+    // 期間で絞る前の保存記録で照合し、保存時に指定した開催日を優先する。
+    const rooms=historyRoomSummaries(historyRows,historyLiveRooms).filter(row=>(!from||row.day>=from)&&(!to||row.day<=to));
+    $("history-sources").textContent=rooms.length?rooms.map(row=>`${row.day} 部屋${row.code}：${row.count}セット`+(row.unsaved?`（保存記録あり${row.saved}／未保存${row.unsaved}）`:"")+(`\n　成立ゲーム数：${row.unknownGameSets?(row.completedGames?`${row.completedGames}ゲーム（ほか${row.unknownGameSets}セットは不明）`:`不明（${row.unknownGameSets}セット）`):`${row.completedGames}ゲーム`}`)+(row.participants.length?`\n　参加者（${row.participants.length}人）：${row.participants.join("、")}`:"")).join("\n\n"):historyLoaded?"対象の部屋履歴はありません。":"保存記録を読み込むと表示されます。";
+    renderHistoryDeleteControls(rooms);
   }catch(error){
     historyRenderError=error.message||"集計できませんでした。";
-    $("history-results").textContent=historyRenderError;$("history-sources").textContent="";
+    $("history-results").textContent=historyRenderError;$("history-sources").textContent="";$("history-zero-delete-controls").innerHTML="";historyZeroDeleteTargets.clear();
   }
   updateHistoryCopyButton();updateHistoryReadStatus();
   return !historyRenderError;
@@ -4727,10 +4938,11 @@ async function loadSimpleHistory(showStatus=true){
     if(request!==historyRequest)return;
     historyLoadError="読込できませんでした："+(error.code==="permission-denied"?"Firestoreの追加ルールを確認してください。":error.message||"通信状態を確認してください。");
   }finally{
-    if(request===historyRequest){historyLoading=false;updateHistoryCopyButton();updateHistoryReadStatus();}
+    if(request===historyRequest){historyLoading=false;updateHistoryCopyButton();updateHistoryReadStatus();renderSimpleHistory();}
   }
 }
 function updateSimpleHistoryControls(){
+  renderHistoryDeleteControls(historyZeroDeleteRows);
   $("history-save").disabled=historyBusy||!isAdmin()||room==="9999";
   if($("history-day").dataset.room!==room){
     $("history-day").dataset.room=room;
